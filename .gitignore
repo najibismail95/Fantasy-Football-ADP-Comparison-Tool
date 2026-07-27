@@ -1,7 +1,16 @@
 node_modules/
+
+# Raw payloads: ~3.5MB/day, too large to commit. Uploaded as a CI artifact
+# instead so a broken parse can still be debugged after the fact.
 data/bronze/
-data/silver/
+
+# The DuckDB file is a rebuildable derivative of the Parquet below.
 data/gold/
+
+# NOTE: data/silver/ is deliberately NOT ignored. The Parquet exports are the
+# durable history — CI runners are ephemeral, so committing them is what makes
+# the ADP time series survive between runs. It cannot be backfilled.
+
 *.log
 .DS_Store
 .env

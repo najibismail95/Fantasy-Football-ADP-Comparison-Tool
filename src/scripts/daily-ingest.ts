@@ -5,8 +5,13 @@ import { fetchState, ingestSleeperSpine } from '../ingest/sleeper.js';
 import { fetchEspn, parseEspn } from '../ingest/espn.js';
 import { fetchBeatAdp, parseBeatAdp } from '../ingest/beatadp.js';
 import { fetchFantasyPros, parseFantasyPros, type FantasyProsFormat } from '../ingest/fantasypros.js';
-import { exportParquet, openDb, replaceDay } from '../db/client.js';
+import { exportParquet, hydrateFromParquet, openDb, replaceDay } from '../db/client.js';
 import type { UnresolvedRow } from '../types.js';
+
+/** Tables mirrored to Parquet, and reloaded from it on a fresh machine. */
+const PERSISTED_TABLES = [
+  'players', 'adp_snapshots', 'ecr_snapshots', 'rank_snapshots', 'projections',
+] as const;
 
 const DRY = process.argv.includes('--dry-run');
 const FP_FORMATS: FantasyProsFormat[] = ['ppr', 'superflex'];
@@ -74,6 +79,16 @@ async function main() {
 
   // 5. Persist. Append-only, idempotent per capture date.
   const conn = await openDb();
+
+  // On a fresh machine (CI) the DB is empty but the committed Parquet holds all
+  // prior days — reload it first or this run would export a single day over the
+  // entire history. See hydrateFromParquet().
+  const hydrated = await hydrateFromParquet(conn, PERSISTED_TABLES, SILVER);
+  if (Object.keys(hydrated).length) {
+    console.log('\nhydrated from parquet: ' +
+      Object.entries(hydrated).map(([t, n]) => `${t}=${n}`).join(' '));
+  }
+
   const d = captureDate;
   const withDate = <T extends object>(rows: T[]) => rows.map((r) => ({ ...r, captured_at: d }));
 
@@ -131,9 +146,12 @@ async function main() {
   console.log('\nwritten:');
   for (const [t, n] of Object.entries(counts)) console.log(`  ${t.padEnd(16)} ${n}`);
 
-  for (const t of ['adp_snapshots', 'ecr_snapshots', 'rank_snapshots', 'projections', 'players']) {
-    await exportParquet(conn, t, SILVER);
-  }
+  for (const t of PERSISTED_TABLES) await exportParquet(conn, t, SILVER);
+
+  const days = await conn.runAndReadAll(
+    'SELECT count(DISTINCT captured_at) AS d, min(captured_at) AS lo, max(captured_at) AS hi FROM adp_snapshots',
+  );
+  console.log('\nhistory: ' + JSON.stringify(days.getRowObjectsJson()[0]));
   console.log(`\nparquet exported to ${SILVER}`);
   console.log(`done in ${((Date.now() - t0) / 1000).toFixed(1)}s`);
 }

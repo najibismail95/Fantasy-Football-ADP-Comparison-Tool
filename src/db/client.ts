@@ -59,3 +59,39 @@ export async function exportParquet(conn: DuckDBConnection, table: string, dir: 
     `COPY (SELECT * FROM ${table}) TO '${path.join(dir, `${table}.parquet`)}' (FORMAT PARQUET)`,
   );
 }
+
+/**
+ * Reload prior history from the committed Parquet into an empty database.
+ *
+ * CI runners are ephemeral: the .duckdb file is gitignored and does not exist
+ * on a fresh machine, but data/silver/*.parquet is committed. Without this
+ * step the run would write a single day and then export it over the whole
+ * accumulated history — silently destroying a time series that cannot be
+ * rebuilt, since nobody publishes historical daily ADP.
+ *
+ * INSERT ... BY NAME matches columns by name, so adding a column to the schema
+ * later doesn't break loading older Parquet (new columns come back NULL).
+ */
+export async function hydrateFromParquet(
+  conn: DuckDBConnection,
+  tables: readonly string[],
+  dir: string,
+): Promise<Record<string, number>> {
+  const loaded: Record<string, number> = {};
+  for (const table of tables) {
+    const file = path.join(dir, `${table}.parquet`);
+    try {
+      await fs.access(file);
+    } catch {
+      continue; // first ever run for this table
+    }
+    const existing = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${table}`);
+    const rows = existing.getRowObjectsJson() as { n: string | number }[];
+    if (Number(rows[0]?.n ?? 0) > 0) continue; // already populated — don't double-load
+
+    await conn.run(`INSERT INTO ${table} BY NAME SELECT * FROM read_parquet('${file}')`);
+    const after = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${table}`);
+    loaded[table] = Number((after.getRowObjectsJson() as { n: string | number }[])[0]?.n ?? 0);
+  }
+  return loaded;
+}

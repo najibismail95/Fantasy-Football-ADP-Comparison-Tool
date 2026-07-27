@@ -1,0 +1,63 @@
+name: Daily ADP ingest
+
+on:
+  schedule:
+    # 11:15 UTC ≈ 7:15am ET. Deliberately off the hour — GitHub's scheduler is
+    # congested on the hour and delays are common.
+    - cron: '15 11 * * *'
+  workflow_dispatch: # lets you trigger a run by hand from the Actions tab
+
+permissions:
+  contents: write # needed to commit the day's Parquet back to the repo
+
+# Never let two runs write the day's snapshot at once.
+concurrency:
+  group: adp-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # Fetches all sources, resolves identities, writes DuckDB + Parquet.
+      # Fails loudly on a broken parse, a rank series in an ADP column, or an
+      # unresolved top-200 player — all of which should stop the day, not be
+      # silently written.
+      - name: Ingest
+        run: npm run ingest
+
+      # Raw payloads, kept briefly so a parse failure is diagnosable. Runs even
+      # when the ingest fails — that's exactly when it's needed.
+      - name: Upload raw payloads
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: bronze-${{ github.run_id }}
+          path: data/bronze/
+          retention-days: 14
+          if-no-files-found: ignore
+
+      - name: Commit snapshot
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/silver
+          if git diff --staged --quiet; then
+            echo "No change in the Parquet exports — nothing to commit."
+            exit 0
+          fi
+          git commit -m "data: ADP snapshot $(date -u +%Y-%m-%d)"
+          # Someone may have pushed while this ran; rebase rather than fail.
+          git pull --rebase --autostash origin main
+          git push
