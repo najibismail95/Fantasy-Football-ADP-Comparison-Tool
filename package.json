@@ -1,0 +1,28 @@
+{
+  "name": "fantasy-adp",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "ingest": "tsx src/scripts/daily-ingest.ts",
+    "ingest:dry": "tsx src/scripts/daily-ingest.ts --dry-run",
+    "query": "duckdb data/gold/fantasy.duckdb",
+    "typecheck": "tsc --noEmit",
+    "report": "tsx src/scripts/report.ts"
+  },
+  "dependencies": {
+    "@duckdb/node-api": "1.5.5-r.2",
+    "p-retry": "^8.0.0",
+    "simple-statistics": "^7.9.3",
+    "talisman": "^1.1.4",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "tsx": "^4.23.1",
+    "typescript": "^5.7.2"
+  }
+}
