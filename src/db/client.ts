@@ -52,6 +52,38 @@ export async function replaceDay(
   return rows.length;
 }
 
+/**
+ * Wholesale replace, for DIMENSION tables rather than time series.
+ *
+ * `players` carries a PRIMARY KEY on player_id, so it cannot be written with
+ * the day-partitioned semantics of replaceDay(): on a new date the DELETE
+ * matches nothing and the INSERT collides with yesterday's rows. It is also
+ * rebuilt in full from Sleeper on every run, so per-day history would be 4,373
+ * near-identical rows a day for no benefit.
+ *
+ * Trade-off: this keeps only current state, so mid-season team changes are not
+ * retained. If that history is wanted later, give the table a composite
+ * (player_id, captured_at) key instead of replacing it.
+ */
+export async function replaceAll(
+  conn: DuckDBConnection,
+  table: string,
+  columns: readonly string[],
+  rows: readonly Record<string, unknown>[],
+): Promise<number> {
+  await conn.run(`DELETE FROM ${table}`);
+  if (!rows.length) return 0;
+  const CHUNK = 500;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const values = rows
+      .slice(i, i + CHUNK)
+      .map((r) => `(${columns.map((c) => sql(r[c])).join(',')})`)
+      .join(',');
+    await conn.run(`INSERT INTO ${table} (${columns.join(',')}) VALUES ${values}`);
+  }
+  return rows.length;
+}
+
 /** Mirror a table to Parquet so the app can query it over HTTPS without a server. */
 export async function exportParquet(conn: DuckDBConnection, table: string, dir: string) {
   await fs.mkdir(dir, { recursive: true });

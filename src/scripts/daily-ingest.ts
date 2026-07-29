@@ -5,13 +5,24 @@ import { fetchState, ingestSleeperSpine } from '../ingest/sleeper.js';
 import { fetchEspn, parseEspn } from '../ingest/espn.js';
 import { fetchBeatAdp, parseBeatAdp } from '../ingest/beatadp.js';
 import { fetchFantasyPros, parseFantasyPros, type FantasyProsFormat } from '../ingest/fantasypros.js';
-import { exportParquet, hydrateFromParquet, openDb, replaceDay } from '../db/client.js';
+import { exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay } from '../db/client.js';
 import type { UnresolvedRow } from '../types.js';
 
-/** Tables mirrored to Parquet, and reloaded from it on a fresh machine. */
-const PERSISTED_TABLES = [
-  'players', 'adp_snapshots', 'ecr_snapshots', 'rank_snapshots', 'projections',
+/**
+ * Time series — accumulate one row set per capture date, and must be reloaded
+ * from Parquet on a fresh machine or history is lost.
+ */
+const TIME_SERIES_TABLES = [
+  'adp_snapshots', 'ecr_snapshots', 'rank_snapshots', 'projections',
 ] as const;
+
+/**
+ * `players` is a dimension table, NOT a time series: it has a PRIMARY KEY and
+ * is rebuilt in full from Sleeper every run. It is therefore replaced wholesale
+ * and deliberately NOT hydrated — hydrating it would reload yesterday's rows
+ * and collide with today's insert.
+ */
+const EXPORTED_TABLES = ['players', ...TIME_SERIES_TABLES] as const;
 
 const DRY = process.argv.includes('--dry-run');
 const FP_FORMATS: FantasyProsFormat[] = ['ppr', 'superflex'];
@@ -83,7 +94,7 @@ async function main() {
   // On a fresh machine (CI) the DB is empty but the committed Parquet holds all
   // prior days — reload it first or this run would export a single day over the
   // entire history. See hydrateFromParquet().
-  const hydrated = await hydrateFromParquet(conn, PERSISTED_TABLES, SILVER);
+  const hydrated = await hydrateFromParquet(conn, TIME_SERIES_TABLES, SILVER);
   if (Object.keys(hydrated).length) {
     console.log('\nhydrated from parquet: ' +
       Object.entries(hydrated).map(([t, n]) => `${t}=${n}`).join(' '));
@@ -93,12 +104,13 @@ async function main() {
   const withDate = <T extends object>(rows: T[]) => rows.map((r) => ({ ...r, captured_at: d }));
 
   const counts: Record<string, number> = {};
-  counts.players = await replaceDay(conn, 'players',
+  // dimension table — wholesale replace, see replaceAll()
+  counts.players = await replaceAll(conn, 'players',
     ['player_id', 'display_name', 'position', 'team', 'espn_id', 'search_rank', 'active', 'captured_at'],
     spine.map((p) => ({
       player_id: p.playerId, display_name: p.displayName, position: p.pos, team: p.team,
       espn_id: p.espnId, search_rank: p.searchRank, active: p.active, captured_at: d,
-    })), d);
+    })));
 
   const allAdp = [...espn.adp, ...beat.adp];
   counts.adp_snapshots = await replaceDay(conn, 'adp_snapshots',
@@ -146,7 +158,7 @@ async function main() {
   console.log('\nwritten:');
   for (const [t, n] of Object.entries(counts)) console.log(`  ${t.padEnd(16)} ${n}`);
 
-  for (const t of PERSISTED_TABLES) await exportParquet(conn, t, SILVER);
+  for (const t of EXPORTED_TABLES) await exportParquet(conn, t, SILVER);
 
   const days = await conn.runAndReadAll(
     'SELECT count(DISTINCT captured_at) AS d, min(captured_at) AS lo, max(captured_at) AS hi FROM adp_snapshots',

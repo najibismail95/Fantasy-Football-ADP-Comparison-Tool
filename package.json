@@ -9,7 +9,6 @@
   "scripts": {
     "ingest": "tsx src/scripts/daily-ingest.ts",
     "ingest:dry": "tsx src/scripts/daily-ingest.ts --dry-run",
-    "query": "duckdb data/gold/fantasy.duckdb",
     "typecheck": "tsc --noEmit",
     "report": "tsx src/scripts/report.ts"
   },
