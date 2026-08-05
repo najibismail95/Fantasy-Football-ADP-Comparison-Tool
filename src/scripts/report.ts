@@ -5,31 +5,11 @@ const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
 
 /**
- * ⚠️ EVERY query below must read a SINGLE capture date.
- *
- * These tables are append-only time series. Once a second day landed, the
- * unscoped queries silently broke in three ways at once:
- *   - counts doubled (ESPN showed 696 rows instead of 348)
- *   - joins fanned out (projections 2 days x ecr 2 days = 4 duplicate rows)
- *   - the leave-one-out median compared a source against ITSELF on another
- *     day, so `n_others = 2` was satisfied by one source counted twice and
- *     `others_agree_within` collapsed to 0
- *
- * Scoping to the latest snapshot up front is the fix. Trend queries that
- * genuinely want multiple days must select from the base tables explicitly.
+ * Every query below reads the *_current views, which are pinned to the latest
+ * capture date in schema.sql. The base tables are append-only time series, so
+ * querying them unscoped silently doubles counts and fans joins out into
+ * duplicate rows. Reach for the base tables only for deliberate trend queries.
  */
-const SNAPSHOT_TABLES = [
-  'adp_snapshots', 'ecr_snapshots', 'rank_snapshots', 'projections',
-  'player_xref', 'unresolved',
-] as const;
-
-for (const t of SNAPSHOT_TABLES) {
-  await conn.run(
-    `CREATE OR REPLACE TEMP VIEW ${t}_now AS
-     SELECT * FROM ${t} WHERE captured_at = (SELECT max(captured_at) FROM ${t})`,
-  );
-}
-
 const asOf = (await q(`SELECT max(captured_at) AS d FROM adp_snapshots`)) as { d: string }[];
 const days = (await q(`SELECT count(DISTINCT captured_at) AS n FROM adp_snapshots`)) as { n: string }[];
 console.log(`\nreporting on snapshot ${asOf[0]?.d} (${days[0]?.n} day(s) of history collected)`);
@@ -43,14 +23,14 @@ console.table(
   SELECT source, count(*) AS players,
          round(min(adp),2) AS earliest_pick, round(max(adp),1) AS deepest_pick,
          round(100.0*sum(CASE WHEN adp != floor(adp) THEN 1 ELSE 0 END)/count(*),1) AS pct_decimal
-  FROM adp_snapshots_now GROUP BY source ORDER BY source`),
+  FROM adp_current GROUP BY source ORDER BY source`),
 );
 
 console.log('=== resolution tier distribution (fuzzy should stay ~0) ===');
 console.table(
   await q(`
   SELECT source, resolve_tier, count(*) AS n
-  FROM player_xref_now GROUP BY 1,2 ORDER BY source, n DESC`),
+  FROM player_xref_current GROUP BY 1,2 ORDER BY source, n DESC`),
 );
 
 console.log('=== A. cross-platform arbitrage: LEAVE-ONE-OUT MEDIAN (PPR/1QB) ===');
@@ -78,7 +58,7 @@ console.table(
     -- Those mean "very late", not an average, and differencing them against an
     -- uncensored source manufactures ~23 picks of fake arbitrage. Drop them.
     -- detectCensoring() in lib/assert.ts finds this threshold from the data.
-    SELECT * FROM adp_snapshots_now WHERE NOT (source = 'ESPN' AND adp > 166)
+    SELECT * FROM adp_current WHERE NOT (source = 'ESPN' AND adp > 166)
   ),
   loo AS (
     SELECT a.player_id, a.source, a.adp,
@@ -104,8 +84,8 @@ console.table(
          round(pr.proj_points,0) AS proj_pts, e.rank_ecr AS expert_rank
   FROM ranked r
   JOIN players p USING (player_id)
-  LEFT JOIN projections_now pr USING (player_id)
-  LEFT JOIN ecr_snapshots_now e ON e.player_id = r.player_id AND e.ecr_format = 'PPR'
+  LEFT JOIN projections_current pr USING (player_id)
+  LEFT JOIN ecr_current e ON e.player_id = r.player_id AND e.ecr_format = 'PPR'
   WHERE r.rn = 1
     AND r.others_spread <= 25          -- the other two must actually agree
     AND abs(r.deviation) >= 30         -- and the outlier must be >2.5 rounds off
@@ -142,8 +122,8 @@ console.log('=== C. experts vs market: WITHIN-POSITION disagreement ===');
 // would be mixing units. std is compared only against other std values.
 console.table(
   await q(`
-  WITH a AS (SELECT player_id, min(adp) AS adp FROM adp_snapshots_now GROUP BY 1),
-       e AS (SELECT player_id, rank_ecr, rank_std FROM ecr_snapshots_now WHERE ecr_format='PPR'),
+  WITH a AS (SELECT player_id, min(adp) AS adp FROM adp_current GROUP BY 1),
+       e AS (SELECT player_id, rank_ecr, rank_std FROM ecr_current WHERE ecr_format='PPR'),
        j AS (
          SELECT p.display_name, p.position, a.adp, e.rank_std,
                 rank() OVER (PARTITION BY p.position ORDER BY a.adp)      AS pos_adp_rank,
@@ -179,8 +159,8 @@ console.table(
 console.log('=== bias check: within-position gap should now center near 0 ===');
 console.table(
   await q(`
-  WITH a AS (SELECT player_id, min(adp) AS adp FROM adp_snapshots_now GROUP BY 1),
-       e AS (SELECT player_id, rank_ecr FROM ecr_snapshots_now WHERE ecr_format='PPR'),
+  WITH a AS (SELECT player_id, min(adp) AS adp FROM adp_current GROUP BY 1),
+       e AS (SELECT player_id, rank_ecr FROM ecr_current WHERE ecr_format='PPR'),
        j AS (
          SELECT p.position,
                 rank() OVER (PARTITION BY p.position ORDER BY a.adp)      AS pos_adp_rank,
@@ -201,12 +181,12 @@ console.table(
     SELECT player_id,
            max(rank) FILTER (WHERE rank_type='PPR')       AS ppr,
            max(rank) FILTER (WHERE rank_type='SUPERFLEX') AS sflex
-    FROM rank_snapshots_now GROUP BY 1)
+    FROM rank_current GROUP BY 1)
   SELECT p.display_name AS player, r.ppr, r.sflex, r.ppr - r.sflex AS moves_up
   FROM r JOIN players p USING (player_id)
   WHERE p.position='QB' AND r.ppr IS NOT NULL AND r.sflex IS NOT NULL
   ORDER BY r.sflex LIMIT 6`),
 );
 
-console.log('=== unresolved_now (surfaced, never dropped) ===');
-console.table(await q(`SELECT source, source_name, position FROM unresolved_now`));
+console.log('=== unresolved_current (surfaced, never dropped) ===');
+console.table(await q(`SELECT source, source_name, position FROM unresolved_current`));
