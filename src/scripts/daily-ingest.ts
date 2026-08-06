@@ -11,9 +11,16 @@ import type { UnresolvedRow } from '../types.js';
 /**
  * Time series — accumulate one row set per capture date, and must be reloaded
  * from Parquet on a fresh machine or history is lost.
+ *
+ * player_xref and unresolved belong here too: they record HOW each source's id
+ * mapped onto the spine and who failed to map at all. Without them in history
+ * there is no way to see when matching quality started to slip — and August
+ * rookie churn is exactly when it does. They must be hydrated as well as
+ * exported, or CI would write a single day over the whole series.
  */
 const TIME_SERIES_TABLES = [
   'adp_snapshots', 'ecr_snapshots', 'rank_snapshots', 'projections',
+  'player_xref', 'unresolved',
 ] as const;
 
 /**
