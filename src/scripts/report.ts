@@ -1,8 +1,34 @@
 import { openDb } from '../db/client.js';
+import { detectCensoring } from '../lib/assert.js';
 
 /** Sanity + first-look queries over the ingested data. `npm run report` */
 const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
+
+/**
+ * Detect a censoring ceiling per source, rather than hardcoding ESPN's — the
+ * same detectCensoring() the arbitrage table already relies on, now driving
+ * the filter instead of a threshold typed in once and never revisited. If
+ * ESPN's pool size changes (or another source starts censoring) this adapts;
+ * a hardcoded 166 would silently go stale. See metrics/confidence.ts, which
+ * does the equivalent per-player exclusion for values.ts.
+ */
+const rawAdpBySource = (await q(`SELECT source, adp FROM adp_current`)) as { source: string; adp: number }[];
+const adpsBySource = new Map<string, number[]>();
+for (const r of rawAdpBySource) {
+  let arr = adpsBySource.get(r.source);
+  if (!arr) adpsBySource.set(r.source, (arr = []));
+  arr.push(Number(r.adp));
+}
+const censorClauses: string[] = [];
+for (const [source, adps] of adpsBySource) {
+  const ceiling = detectCensoring(adps);
+  if (ceiling !== null) {
+    censorClauses.push(`(source = '${source}' AND adp > ${ceiling})`);
+    console.log(`[censoring] ${source} ceiling detected at pick ${ceiling.toFixed(0)} — excluded from arbitrage`);
+  }
+}
+const CENSOR_FILTER = censorClauses.length ? `NOT (${censorClauses.join(' OR ')})` : 'TRUE';
 
 /**
  * Every query below reads the *_current views, which are pinned to the latest
@@ -54,11 +80,11 @@ console.log('=== A. cross-platform arbitrage: LEAVE-ONE-OUT MEDIAN (PPR/1QB) ===
 console.table(
   await q(`
   WITH clean AS (
-    -- ESPN ranks a fixed pool, so 51% of its values pile up at picks 166-171.
-    -- Those mean "very late", not an average, and differencing them against an
-    -- uncensored source manufactures ~23 picks of fake arbitrage. Drop them.
-    -- detectCensoring() in lib/assert.ts finds this threshold from the data.
-    SELECT * FROM adp_current WHERE NOT (source = 'ESPN' AND adp > 166)
+    -- Ceiling(s) detected above from THIS run's data, not hardcoded — a source
+    -- that ranks a fixed pool piles values up near its max, and those mean
+    -- "very late" rather than a real average. Differencing them against an
+    -- uncensored source manufactures fake arbitrage. See CENSOR_FILTER above.
+    SELECT * FROM adp_current WHERE ${CENSOR_FILTER}
   ),
   loo AS (
     SELECT a.player_id, a.source, a.adp,
@@ -84,7 +110,13 @@ console.table(
          round(pr.proj_points,0) AS proj_pts, e.rank_ecr AS expert_rank
   FROM ranked r
   JOIN players p USING (player_id)
-  LEFT JOIN projections_current pr USING (player_id)
+  -- Aggregated, NOT joined raw: projections now carry one row per SOURCE
+  -- (ESPN + Sleeper), so a plain LEFT JOIN would duplicate every arbitrage
+  -- row per source — the same fanout that multi-day data caused earlier.
+  LEFT JOIN (
+    SELECT player_id, avg(proj_points) AS proj_points
+    FROM projections_current WHERE scoring = 'PPR' GROUP BY 1
+  ) pr USING (player_id)
   LEFT JOIN ecr_current e ON e.player_id = r.player_id AND e.ecr_format = 'PPR'
   WHERE r.rn = 1
     AND r.others_spread <= 25          -- the other two must actually agree

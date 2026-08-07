@@ -5,6 +5,9 @@ import { fetchState, ingestSleeperSpine } from '../ingest/sleeper.js';
 import { fetchEspn, parseEspn } from '../ingest/espn.js';
 import { fetchBeatAdp, parseBeatAdp } from '../ingest/beatadp.js';
 import { fetchFantasyPros, parseFantasyPros, type FantasyProsFormat } from '../ingest/fantasypros.js';
+import {
+  fetchSleeperProjections, parseSleeperProjections, parseSleeperAdp,
+} from '../ingest/sleeper-projections.js';
 import { exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay } from '../db/client.js';
 import type { UnresolvedRow } from '../types.js';
 
@@ -58,6 +61,17 @@ async function main() {
 
   const beat = parseBeatAdp(await fetchBeatAdp(captureDate), xwalk);
 
+  // Second projection source. Keyed by Sleeper player_id, so it joins to the
+  // spine directly with no crosswalk. ESPN alone compresses the middle of each
+  // position too much to tier on — see ingest/sleeper-projections.ts.
+  const spineIds = new Set(spine.map((p) => p.playerId));
+  // One fetch serves both projections and ADP.
+  const sleeperBody = await fetchSleeperProjections(state.season, captureDate);
+  const sleeperProj = parseSleeperProjections(sleeperBody, spineIds);
+  const sleeperAdp = parseSleeperAdp(sleeperBody, spineIds);
+  console.log(`sleeper projections: ${sleeperProj.seen} players (PPR), ${sleeperProj.projections.length} rows across scorings`);
+  console.log(`sleeper adp: ${sleeperAdp.seen} players (${sleeperAdp.sentinelsDropped} undrafted sentinels dropped)`);
+
   const fpResults = [];
   for (const fmt of FP_FORMATS) {
     const r = parseFantasyPros(await fetchFantasyPros(fmt, captureDate), fmt, xwalk);
@@ -72,7 +86,7 @@ async function main() {
   const rate = (ok: number, total: number) => (total ? ((100 * ok) / total).toFixed(1) : '—');
   console.log('\nresolution:');
   console.log(`  espn          ${espn.adp.length} adp / ${espn.ranks.length} ranks / ${espn.projections.length} proj  (${espn.unresolved.length} unresolved)`);
-  console.log(`  beatadp       ${beat.adp.length} adp from ${beat.rowsSeen} rows  → ${rate(beat.rowsSeen - beat.unresolved.length, beat.rowsSeen)}%  (${beat.unresolved.length} unresolved)`);
+  console.log(`  beatadp/fpros ${beat.adp.length} adp from ${beat.rowsSeen} rows  → ${rate(beat.rowsSeen - beat.unresolved.length, beat.rowsSeen)}%  (${beat.unresolved.length} unresolved)`);
   for (const [i, r] of fpResults.entries()) {
     const total = r.ecr.length + r.unresolved.length;
     console.log(`  fantasypros/${FP_FORMATS[i]}  ${r.ecr.length} ecr  → ${rate(r.ecr.length, total)}%  (${r.unresolved.length} unresolved)`);
@@ -84,7 +98,7 @@ async function main() {
   }
 
   // 4. Coverage gate on the players that actually matter.
-  const topAdp = [...beat.adp, ...espn.adp].sort((a, b) => a.adp - b.adp).slice(0, COVERAGE_GATE_TOP_N);
+  const topAdp = [...beat.adp, ...espn.adp, ...sleeperAdp.adp].sort((a, b) => a.adp - b.adp).slice(0, COVERAGE_GATE_TOP_N);
   const gateFails = topAdp.filter((r) => !r.playerId).length;
   if (gateFails > 0) {
     throw new Error(`coverage gate: ${gateFails} of the top ${COVERAGE_GATE_TOP_N} players by ADP are unresolved`);
@@ -119,7 +133,7 @@ async function main() {
       espn_id: p.espnId, search_rank: p.searchRank, active: p.active, captured_at: d,
     })));
 
-  const allAdp = [...espn.adp, ...beat.adp];
+  const allAdp = [...espn.adp, ...beat.adp, ...sleeperAdp.adp];
   counts.adp_snapshots = await replaceDay(conn, 'adp_snapshots',
     ['player_id', 'source', 'adp_format', 'adp', 'auction_value', 'captured_at'],
     allAdp.map((r) => ({
@@ -143,7 +157,7 @@ async function main() {
 
   counts.projections = await replaceDay(conn, 'projections',
     ['player_id', 'source', 'scoring', 'proj_points', 'captured_at'],
-    espn.projections.map((r) => ({
+    [...espn.projections, ...sleeperProj.projections].map((r) => ({
       player_id: r.playerId, source: r.source, scoring: r.scoring,
       proj_points: r.projPoints, captured_at: d,
     })), d);
