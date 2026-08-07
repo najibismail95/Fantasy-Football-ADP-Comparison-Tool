@@ -6,13 +6,22 @@ import type { Crosswalk } from '../resolve/crosswalk.js';
 import type { AdpRow, UnresolvedRow } from '../types.js';
 
 /**
- * The ONLY source of Sleeper ADP. Sleeper's own API has none.
+ * The only source of FantasyPros ADP.
  *
  * ⚠️ This is a scrape, not an API. No /api/ route exists (verified: no /api/,
  * supabase, trpc, or fetch() references in the page). The dataset ships inside
  * the Next.js RSC payload, so a redeploy on their side can break this parse.
- * That is the highest-risk dependency in the project — hence the row-count
- * floor below and the bronze copy above it.
+ *
+ * ⚠️ Its SLEEPER column is no longer used. Sleeper ADP now comes straight from
+ * Sleeper's own API (ingest/sleeper-projections.ts): verified byte-identical
+ * where they overlap — mean difference 0.00 picks across all 237 shared
+ * players, because beatadp is simply republishing that API — but with 311
+ * players instead of 237. Dropping it here means a beatadp outage costs one
+ * source rather than two.
+ *
+ * FantasyPros ADP has no key-free alternative: api.fantasypros.com returns 403
+ * on every path (including with a key header), and the public ADP page
+ * server-renders only 5 rows before loading the rest client-side.
  *
  * ⚠️ The page's "ESPN" column is ESPN's draft RANK, not ADP (every value is an
  * integer; ESPN's true ADP is 1.66/2.58/3.65 for the same players). It is
@@ -55,8 +64,9 @@ export function parseBeatAdp(html: string, xwalk: Crosswalk): BeatAdpResult {
       continue;
     }
 
-    // Only SLEEPER and FANTASYPROS carry real ADP here. ESPN is a rank — skip it.
-    for (const key of ['SLEEPER', 'FANTASYPROS'] as const) {
+    // FantasyPros only now: ESPN's column here is a rank, and Sleeper comes
+    // from Sleeper's own API with better coverage. See the header note.
+    for (const key of ['FANTASYPROS'] as const) {
       const hit = new RegExp(`"${key}":([0-9.]+)`).exec(adps ?? '');
       const value = hit?.[1] ? Number(hit[1]) : NaN;
       if (!Number.isFinite(value)) continue;
@@ -79,8 +89,6 @@ export function parseBeatAdp(html: string, xwalk: Crosswalk): BeatAdpResult {
         `The RSC payload shape has probably changed — inspect the bronze copy before trusting this run.`,
     );
   }
-  for (const src of ['SLEEPER', 'FANTASYPROS'] as const) {
-    assertLooksLikeAdp(`beatadp.${src}`, out.adp.filter((r) => r.source === src).map((r) => r.adp));
-  }
+  assertLooksLikeAdp('beatadp.FANTASYPROS', out.adp.map((r) => r.adp));
   return out;
 }
