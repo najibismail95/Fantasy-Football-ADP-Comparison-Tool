@@ -5,6 +5,7 @@ import { fetchState, ingestSleeperSpine } from '../ingest/sleeper.js';
 import { fetchEspn, parseEspn } from '../ingest/espn.js';
 import { fetchBeatAdp, parseBeatAdp } from '../ingest/beatadp.js';
 import { fetchFantasyPros, parseFantasyPros, type FantasyProsFormat } from '../ingest/fantasypros.js';
+import { fetchSleeperProjections, parseSleeperProjections } from '../ingest/sleeper-projections.js';
 import { exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay } from '../db/client.js';
 import type { UnresolvedRow } from '../types.js';
 
@@ -57,6 +58,16 @@ async function main() {
   console.log(`espn team map: ${xwalk.espnTeamCount} teams derived`);
 
   const beat = parseBeatAdp(await fetchBeatAdp(captureDate), xwalk);
+
+  // Second projection source. Keyed by Sleeper player_id, so it joins to the
+  // spine directly with no crosswalk. ESPN alone compresses the middle of each
+  // position too much to tier on — see ingest/sleeper-projections.ts.
+  const spineIds = new Set(spine.map((p) => p.playerId));
+  const sleeperProj = parseSleeperProjections(
+    await fetchSleeperProjections(state.season, captureDate),
+    spineIds,
+  );
+  console.log(`sleeper projections: ${sleeperProj.seen} players (PPR), ${sleeperProj.projections.length} rows across scorings`);
 
   const fpResults = [];
   for (const fmt of FP_FORMATS) {
@@ -143,7 +154,7 @@ async function main() {
 
   counts.projections = await replaceDay(conn, 'projections',
     ['player_id', 'source', 'scoring', 'proj_points', 'captured_at'],
-    espn.projections.map((r) => ({
+    [...espn.projections, ...sleeperProj.projections].map((r) => ({
       player_id: r.playerId, source: r.source, scoring: r.scoring,
       proj_points: r.projPoints, captured_at: d,
     })), d);

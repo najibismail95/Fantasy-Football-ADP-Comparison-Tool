@@ -110,7 +110,13 @@ console.table(
          round(pr.proj_points,0) AS proj_pts, e.rank_ecr AS expert_rank
   FROM ranked r
   JOIN players p USING (player_id)
-  LEFT JOIN projections_current pr USING (player_id)
+  -- Aggregated, NOT joined raw: projections now carry one row per SOURCE
+  -- (ESPN + Sleeper), so a plain LEFT JOIN would duplicate every arbitrage
+  -- row per source — the same fanout that multi-day data caused earlier.
+  LEFT JOIN (
+    SELECT player_id, avg(proj_points) AS proj_points
+    FROM projections_current WHERE scoring = 'PPR' GROUP BY 1
+  ) pr USING (player_id)
   LEFT JOIN ecr_current e ON e.player_id = r.player_id AND e.ecr_format = 'PPR'
   WHERE r.rn = 1
     AND r.others_spread <= 25          -- the other two must actually agree

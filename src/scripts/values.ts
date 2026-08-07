@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG, type LeagueConfig } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
 import { computeVorp, computeValueScore, gradeValueScores } from '../metrics/vorp.js';
 import { buildConsensusAdp, expertConfidence, type RawAdpRow } from '../metrics/confidence.js';
+import { blendProjections, type SourceProjection } from '../metrics/projections.js';
 import { roundOf, roundNumber } from '../metrics/rounds.js';
 
 /**
@@ -17,17 +18,26 @@ const posFilter = posArg?.toUpperCase();
 const roundMin = minArg ? Number(minArg) : 1;
 const roundMax = maxArg ? Number(maxArg) : 30;
 
+
 const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
 
-// ESPN is currently the only projections source (PLAN.md §0.1). scoring='PPR'
-// matches the config below — see the caveat in FORMATS.md §4 about re-deriving
-// projections for HALF/STD instead of reusing the PPR total.
-const projRows = (await q(`
-  SELECT pr.player_id AS "playerId", p.position AS pos, pr.proj_points AS points
+// Blended across ESPN + Sleeper. ESPN alone compresses the middle of each
+// position (RB5-RB14 inside 20 points, six within one point), which made both
+// tiers and value scores mush. See metrics/projections.ts.
+const rawProj = (await q(`
+  SELECT pr.player_id AS "playerId", pr.source, pr.scoring, pr.proj_points AS points,
+         p.position AS pos
   FROM projections_current pr JOIN players p USING (player_id)
-  WHERE pr.scoring = 'PPR'
-`)) as ProjectedPlayer[];
+  WHERE pr.scoring = '${DEFAULT_CONFIG.scoring}'
+`)) as (SourceProjection & { pos: string })[];
+
+const posByPlayer = new Map(rawProj.map((r) => [r.playerId, r.pos]));
+const projRows: ProjectedPlayer[] = blendProjections(rawProj).map((b) => ({
+  playerId: b.playerId,
+  pos: posByPlayer.get(b.playerId) as ProjectedPlayer['pos'],
+  points: b.points,
+}));
 
 const cfg: LeagueConfig = DEFAULT_CONFIG;
 const repl = replacementLevels(projRows, cfg);

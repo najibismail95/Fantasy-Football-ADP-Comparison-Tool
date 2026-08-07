@@ -51,7 +51,10 @@ export type RankRow = {
 
 export type ProjectionRow = {
   playerId: string | null;
-  source: 'ESPN';
+  /** ESPN compresses the middle of each position; SLEEPER spreads it. Both are
+   *  ingested and blended — see metrics/projections.ts. */
+  source: 'ESPN' | 'SLEEPER';
+  /** PPR | HALF | STD. ESPN supplies PPR only; Sleeper supplies all three. */
   scoring: string;
   projPoints: number;
   sourceId: string;

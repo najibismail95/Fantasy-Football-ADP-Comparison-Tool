@@ -39,7 +39,30 @@ export const SOURCES = {
     state: 'https://api.sleeper.app/v1/state/nfl',
     players: (pos: string) => `https://api.sleeper.app/v1/players/nfl?position=${pos}`,
     positions: ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'] as const,
+    /**
+     * Undocumented, but a genuinely better projection source than ESPN and
+     * already keyed by Sleeper player_id — our canonical spine id — so it
+     * needs no entity resolution at all.
+     *
+     * Measured on RBs: ESPN compresses RB5-RB14 into 20 points, Sleeper
+     * spreads the same band over 58. Where the two disagree, Sleeper tracks
+     * the market better (Chase Brown: ESPN RB15, Sleeper RB7, market RB9).
+     * That compression is what made RB tiers useless — no clustering
+     * algorithm can separate players a projection source rates identically.
+     *
+     * Also carries pts_ppr / pts_half_ppr / pts_std, which is the only route
+     * we have to HALF and STD scoring (FORMATS.md §4).
+     */
+    projections: (season: number) =>
+      `https://api.sleeper.app/v1/projections/nfl/regular/${season}`,
   },
+} as const;
+
+/** Sleeper's per-scoring projection keys. */
+export const SLEEPER_PTS_KEY = {
+  PPR: 'pts_ppr',
+  HALF: 'pts_half_ppr',
+  STD: 'pts_std',
 } as const;
 
 /** ESPN defaultPositionId -> position. */
