@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG, type LeagueConfig } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
 import { computeVorp, computeValueScore, gradeValueScores } from '../metrics/vorp.js';
 import { buildConsensusAdp, expertConfidence, type RawAdpRow } from '../metrics/confidence.js';
+import { roundOf, roundNumber } from '../metrics/rounds.js';
 
 /**
  * "Find me value QBs in the late rounds" — for any position, any round range.
@@ -90,7 +91,13 @@ const confidence = expertConfidence(
 
 const results = graded
   .filter((v) => !posFilter || v.pos === posFilter)
-  .filter((v) => v.adp / cfg.teams + 1 >= roundMin && v.adp / cfg.teams + 1 <= roundMax)
+  // Filter on the INTEGER round, not the fractional position: "rounds 9-16"
+  // means every pick in those rounds. Comparing the fractional roundOf against
+  // roundMax would cut at 16.0 (pick 181) and drop the rest of round 16.
+  .filter((v) => {
+    const rd = roundNumber(v.adp, cfg.teams);
+    return rd >= roundMin && rd <= roundMax;
+  })
   .sort((a, b) => b.valueScore - a.valueScore)
   .slice(0, 15);
 
@@ -106,7 +113,7 @@ console.table(
     player: nameByPlayer.get(r.playerId) ?? r.playerId,
     pos: r.pos,
     adp: Number(r.adp.toFixed(1)),
-    round: Number((r.adp / cfg.teams + 1).toFixed(1)),
+    round: Number(roundOf(r.adp, cfg.teams).toFixed(1)),
     drafted_as: `${r.pos}${r.adpRank}`,
     produces_like: `${r.pos}${r.vorpRank}`,
     grade: r.grade,
