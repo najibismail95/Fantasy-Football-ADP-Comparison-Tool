@@ -56,10 +56,18 @@ export class Crosswalk {
    * Learn ESPN's proTeamId -> team abbreviation by matching players on
    * name+position first, then taking the modal Sleeper team per id.
    * Measured: 32 teams, agreement 1.00 (unanimous). Survives ESPN renumbering.
+   *
+   * proTeamId 0 is ESPN's "free agent / no team" marker, not a real franchise.
+   * Left in the vote, a free agent who happens to share a normalized name with
+   * a real player got counted as a vote for THAT player's team, producing a
+   * phantom `0 -> WAS` mapping (33 "teams" instead of 32). Harmless for the
+   * one case seen so far (a free-agent WR, which resolves on name+position,
+   * not team) but would silently mis-team a DEF-position row with id 0.
    */
   learnEspnTeams(rows: { name: string; pos: string | null; proTeamId: number }[]): void {
     const votes = new Map<number, Map<string, number>>();
     for (const r of rows) {
+      if (r.proTeamId === 0) continue; // not a real team — see above
       const pos = normPos(r.pos);
       const cands = (this.byName.get(normName(r.name)) ?? []).filter((c) => c.pos === pos);
       if (!cands.length) continue;
