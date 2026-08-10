@@ -85,8 +85,9 @@ describe('computeVorp + computeValueScore', () => {
     assert.equal(belowReplacement!.vorp, -50);
   });
 
-  test('value score is positive when a player outproduces his draft slot', () => {
-    // Best VORP (rank 1) but drafted 3rd at the position (adpRank 3) -> value 2.
+  test('value score is measured in POINTS above the ADP-slot expectation, not rank spots', () => {
+    // Best VORP (rank 1) but drafted 3rd at the position (adpRank 3): he beats
+    // whoever WOULD be picked 3rd (stud2, vorp 80) by 20 points of production.
     const results = computeValueScore([
       { playerId: 'sleeper', pos: 'RB', vorp: 100, adp: 40 }, // best production, 3rd off the board
       { playerId: 'stud1', pos: 'RB', vorp: 90, adp: 5 },
@@ -95,7 +96,49 @@ describe('computeVorp + computeValueScore', () => {
     const sleeper = results.find((r) => r.playerId === 'sleeper')!;
     assert.equal(sleeper.vorpRank, 1);
     assert.equal(sleeper.adpRank, 3);
-    assert.equal(sleeper.valueScore, 2);
+    assert.equal(sleeper.valueScore, 20, '100 (his vorp) - 80 (vorp of the rank-3 slot) = 20 points');
+  });
+
+  test('a small rank move at the top of a position outscores a bigger rank move at the bottom', () => {
+    // Regression for the actual bug: a rank-spot formula (adpRank - vorpRank)
+    // let a replacement-level RB "beat" Derrick Henry on value purely because
+    // ranks are dense and noisy deep in a position and sparse at the top.
+    //
+    // One combined 13-player RB pool (computeValueScore ranks position-wide,
+    // so "elite" and "deep" aren't isolated groups — they compete on one board):
+    //   henry: drafted 3rd (adp=30), produces 1st (vorp=240) -> a 2-spot move
+    //          worth 40 real points (240 vs the 200 a true RB3 produces).
+    //   d9:    drafted LAST (adp=168), produces best-of-the-scrubs (vorp=-40)
+    //          -> a 9-spot move worth only 9 real points, because the whole
+    //          deep tier is clustered within 9 points of each other.
+    const elite = [
+      { playerId: 'e2', pos: 'RB', vorp: 220, adp: 12 },
+      { playerId: 'e3', pos: 'RB', vorp: 200, adp: 20 },     // the "true RB3" baseline
+      { playerId: 'henry', pos: 'RB', vorp: 240, adp: 30 },  // drafted RB3, produces RB1
+    ];
+    // d9 has the best vorp of the deep tier (-40) but the worst adp (168) ->
+    // biggest rank-spot move in the whole pool, smallest real point gap.
+    const deep = Array.from({ length: 10 }, (_, i) => ({
+      playerId: `d${i}`, pos: 'RB',
+      vorp: i === 9 ? -40 : -49 + i, // d0..d8 = -49..-41, d9 = -40 (best of the tier)
+      adp: 150 + i * 2,              // d9's adp (168) is the LATEST of the whole pool
+    }));
+    const results = computeValueScore([...elite, ...deep]);
+    const henry = results.find((r) => r.playerId === 'henry')!;
+    const d9 = results.find((r) => r.playerId === 'd9')!;
+
+    assert.equal(henry.adpRank, 3);
+    assert.equal(henry.vorpRank, 1);
+    assert.equal(henry.valueScore, 40, '240 (his vorp) - 200 (what a true RB3 produces) = 40');
+
+    assert.equal(d9.adpRank, 13);
+    assert.equal(d9.vorpRank, 4);
+    assert.equal(d9.valueScore, 9, '-40 (his vorp) - -49 (what the true RB13 produces) = 9');
+
+    // The bug: d9's RANK move (13 -> 4 = 9 spots) is bigger than Henry's
+    // (3 -> 1 = 2 spots), so the old rank-based formula ranked d9 above Henry.
+    // The fix must invert that, because Henry's real edge is bigger.
+    assert.ok(henry.valueScore > d9.valueScore, "Henry's real 40pt edge must beat d9's 9pt edge");
   });
 
   test('ranks are computed WITHIN position, never across positions', () => {
