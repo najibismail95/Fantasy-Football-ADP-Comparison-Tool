@@ -36,7 +36,8 @@ export type ValueResult = ValueInput & {
   vorpRank: number;
   /** 1 = earliest ADP at the position. Where the market actually takes him. */
   adpRank: number;
-  /** vorpRank - adpRank: positive means he outproduces where he's drafted. */
+  /** VORP minus the VORP typically produced by whoever is drafted at his ADP
+   *  rank, in POINTS. Positive = outproduces his draft slot; negative = reach. */
   valueScore: number;
 };
 
@@ -47,8 +48,17 @@ export type ValueResult = ValueInput & {
  * curves, so an unscoped comparison mostly measures "what position is this"
  * rather than "is he underpriced".
  *
- * valueScore > 0: drafted later than his production justifies — a value.
- * valueScore < 0: drafted earlier than his production justifies — a reach.
+ * valueScore is measured in POINTS relative to expectation at his ADP slot,
+ * NOT in rank spots (adpRank - vorpRank). A prior version used rank spots and
+ * it was actively misleading: a bench-caliber RB moving 6 rank spots deep in
+ * the position (e.g. RB48 -> RB42, both below replacement) scored HIGHER than
+ * Derrick Henry moving 2 spots (RB12 -> RB10) — even though Henry's 2 spots
+ * are worth ~4x the real points of the 6 deep-bench spots, because ranks are
+ * dense and noisy at the bottom of a position and sparse and meaningful at
+ * the top. Measured: RB1-6 is ~15.7 pts/rank-spot; RB65-71 is ~2.5. A rank-
+ * based score can't tell a 6-spot move at the bottom from one at the top; a
+ * points-based score can, because it asks "how many points is he beating the
+ * player who WOULD have been taken at his actual ADP slot" directly.
  */
 export function computeValueScore(players: readonly ValueInput[]): ValueResult[] {
   const byPos = new Map<string, ValueInput[]>();
@@ -62,6 +72,9 @@ export function computeValueScore(players: readonly ValueInput[]): ValueResult[]
   for (const arr of byPos.values()) {
     const byVorp = [...arr].sort((a, b) => b.vorp - a.vorp);
     const vorpRank = new Map(byVorp.map((p, i) => [p.playerId, i + 1]));
+    // What a typical pick at rank K actually produces, in VORP points —
+    // the "expectation" a player's own production is compared against.
+    const vorpAtRank = new Map(byVorp.map((p, i) => [i + 1, p.vorp]));
 
     const byAdp = [...arr].sort((a, b) => a.adp - b.adp);
     const adpRank = new Map(byAdp.map((p, i) => [p.playerId, i + 1]));
@@ -69,7 +82,10 @@ export function computeValueScore(players: readonly ValueInput[]): ValueResult[]
     for (const p of arr) {
       const vr = vorpRank.get(p.playerId)!;
       const ar = adpRank.get(p.playerId)!;
-      out.push({ ...p, vorpRank: vr, adpRank: ar, valueScore: ar - vr });
+      // Same pool backs both maps, so rank ar always has an entry — no
+      // fallback needed, but ?? guards against a future refactor breaking that.
+      const expectedVorp = vorpAtRank.get(ar) ?? p.vorp;
+      out.push({ ...p, vorpRank: vr, adpRank: ar, valueScore: p.vorp - expectedVorp });
     }
   }
   return out;
