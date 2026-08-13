@@ -2,7 +2,9 @@ import { openDb } from '../db/client.js';
 import { DEFAULT_CONFIG, type LeagueConfig } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
 import { computeVorp, computeValueScore, gradeValueScores } from '../metrics/vorp.js';
-import { buildConsensusAdp, expertConfidence, type RawAdpRow } from '../metrics/confidence.js';
+import {
+  buildConsensusAdp, expertConfidence, projectionConfidence, type RawAdpRow,
+} from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
 import { roundOf, roundNumber } from '../metrics/rounds.js';
 
@@ -33,11 +35,15 @@ const rawProj = (await q(`
 `)) as (SourceProjection & { pos: string })[];
 
 const posByPlayer = new Map(rawProj.map((r) => [r.playerId, r.pos]));
-const projRows: ProjectedPlayer[] = blendProjections(rawProj).map((b) => ({
+const blended = blendProjections(rawProj);
+const projRows: ProjectedPlayer[] = blended.map((b) => ({
   playerId: b.playerId,
   pos: posByPlayer.get(b.playerId) as ProjectedPlayer['pos'],
   points: b.points,
 }));
+// Kept for projectionConfidence below — how far ESPN and Sleeper's raw
+// projections disagreed for this player, before they got averaged away.
+const spreadByPlayer = new Map(blended.map((b) => [b.playerId, { spread: b.spread, sources: b.sources }]));
 
 const cfg: LeagueConfig = DEFAULT_CONFIG;
 const repl = replacementLevels(projRows, cfg);
@@ -87,17 +93,39 @@ const nameByPlayer = new Map(
   }[]).map((r) => [r.playerId, r.name]),
 );
 
-// Expert-disagreement confidence: a FLAG, not a filter — unlike the censored/
-// single-source ADP dropped above (bad input), experts genuinely disagreeing
-// is real information about a player, not corrupted data. See confidence.ts.
+// Two INDEPENDENT confidence checks, both flags rather than filters — unlike
+// the censored/single-source ADP dropped above (bad input), disagreement is
+// real information about a player, not corrupted data. A player can fail
+// either, both, or neither: expert agreement doesn't imply model agreement,
+// or vice versa (see confidence.test.ts). See metrics/confidence.ts.
 const ecrRows = (await q(`
   SELECT player_id AS "playerId", rank_std AS "rankStd" FROM ecr_current WHERE ecr_format = 'PPR'
 `)) as { playerId: string; rankStd: number | null }[];
 const stdByPlayer = new Map(ecrRows.map((r) => [r.playerId, r.rankStd]));
-const confidence = expertConfidence(
+const expertConf = expertConfidence(
   graded.map((g) => ({ playerId: g.playerId, pos: g.pos, adp: g.adp, rankStd: stdByPlayer.get(g.playerId) ?? null })),
   cfg.teams,
 );
+// Found via Tyjae Spears, who topped the board after the rank-vs-points fix
+// (vorp.ts) largely because ESPN and Sleeper's raw projections were 34 points
+// apart for him — a disagreement expertConf can't see, since it only looks
+// at FantasyPros' rank consensus, not the underlying point projections.
+const projConf = projectionConfidence(
+  graded.map((g) => ({
+    playerId: g.playerId, pos: g.pos, adp: g.adp,
+    spread: spreadByPlayer.get(g.playerId)?.spread ?? 0,
+    sources: spreadByPlayer.get(g.playerId)?.sources ?? 1,
+  })),
+  cfg.teams,
+);
+const confidenceLabel = (id: string): string => {
+  const e = expertConf.get(id) === 'LOW';
+  const p = projConf.get(id) === 'LOW';
+  if (e && p) return 'LOW (experts+models)';
+  if (e) return 'LOW (experts)';
+  if (p) return 'LOW (models)';
+  return 'OK';
+};
 
 const results = graded
   .filter((v) => !posFilter || v.pos === posFilter)
@@ -127,6 +155,6 @@ console.table(
     drafted_as: `${r.pos}${r.adpRank}`,
     produces_like: `${r.pos}${r.vorpRank}`,
     grade: r.grade,
-    confidence: confidence.get(r.playerId) ?? 'OK',
+    confidence: confidenceLabel(r.playerId),
   })),
 );
