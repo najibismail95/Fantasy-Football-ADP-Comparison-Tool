@@ -44,12 +44,25 @@ console.log('\n=== integrity: ADP must be decimal, not rank (PLAN.md §0.3) ==='
 // ADP values are draft POSITIONS, so min() is the most expensive player and
 // max() is how deep the source publishes — named explicitly, since "lo"/"hi"
 // read as low/high value and mean the opposite here.
+//
+// pct_decimal is measured over the TOP 300 by draft position, matching
+// assertLooksLikeAdp exactly. Measuring the whole series instead showed
+// Sleeper at 55% — permanently alarming under a header saying "must be
+// decimal", while the ingest guard passed. That contradiction trains you to
+// ignore the table. Deep small-sample players legitimately have integer ADP
+// (drafted once at pick 440 -> 440.0); the top of the board is where a
+// swapped-in rank column would actually show. See lib/assert.ts.
 console.table(
   await q(`
+  WITH ranked AS (
+    SELECT source, adp, row_number() OVER (PARTITION BY source ORDER BY adp) AS rn
+    FROM adp_current
+  )
   SELECT source, count(*) AS players,
          round(min(adp),2) AS earliest_pick, round(max(adp),1) AS deepest_pick,
-         round(100.0*sum(CASE WHEN adp != floor(adp) THEN 1 ELSE 0 END)/count(*),1) AS pct_decimal
-  FROM adp_current GROUP BY source ORDER BY source`),
+         round(100.0*sum(CASE WHEN rn <= 300 AND adp != floor(adp) THEN 1 ELSE 0 END)
+               / nullif(sum(CASE WHEN rn <= 300 THEN 1 ELSE 0 END), 0), 1) AS pct_decimal_top300
+  FROM ranked GROUP BY source ORDER BY source`),
 );
 
 console.log('=== resolution tier distribution (fuzzy should stay ~0) ===');

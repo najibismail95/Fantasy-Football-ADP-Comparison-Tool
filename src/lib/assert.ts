@@ -6,20 +6,39 @@
  *  - ESPN's draftRanksByRankType.SUPERFLEX is a rank            (FORMATS.md §1)
  *
  * A real averaged ADP is almost never a whole number. A rank always is.
+ *
+ * ⚠️ Only the TOP N values by draft position are checked, not the whole
+ * series. Checking everything produced a false positive that broke the daily
+ * ingest on 2026-08-14: as draft season ramped up, Sleeper expanded ADP
+ * coverage from 311 to 804 players, and the ~490 new ones were nearly all
+ * deep guys appearing in a handful of drafts. A player taken once at pick 440
+ * has an ADP of exactly 440.0 — legitimate data, but integer, which dragged
+ * the overall non-integer ratio from ~87% to 55% and tripped the guard.
+ *
+ * Scoping to the top of the board is also strictly MORE sensitive to the
+ * failure mode being guarded against: if a rank series were swapped in, picks
+ * 1-300 would read 1, 2, 3, 4... Measured on the same day this fired, the top
+ * 300 were 89.7% non-integer (healthy) while a simulated rank series scored
+ * 0%. The deep tail carries no signal about column swaps, only sample-size
+ * noise, so including it only adds false positives.
  */
 export function assertLooksLikeAdp(
   label: string,
   values: readonly number[],
-  { minFractionNonInteger = 0.8 } = {},
+  { minFractionNonInteger = 0.8, checkTopN = 300 } = {},
 ): void {
   const finite = values.filter((v) => Number.isFinite(v));
   if (finite.length < 20) return; // too small to judge; don't block the run
-  const nonInt = finite.filter((v) => !Number.isInteger(v)).length;
-  const ratio = nonInt / finite.length;
+  // Ascending = earliest picks first; those are the ones a swapped-in rank
+  // column would corrupt most visibly.
+  const scoped = [...finite].sort((a, b) => a - b).slice(0, checkTopN);
+  const nonInt = scoped.filter((v) => !Number.isInteger(v)).length;
+  const ratio = nonInt / scoped.length;
   if (ratio < minFractionNonInteger) {
     throw new Error(
       `[${label}] looks like RANK data, not ADP: only ${(ratio * 100).toFixed(0)}% ` +
-        `of ${finite.length} values are non-integer (expected >=${minFractionNonInteger * 100}%). ` +
+        `of the top ${scoped.length} values (of ${finite.length}) are non-integer ` +
+        `(expected >=${minFractionNonInteger * 100}%). ` +
         `Refusing to write it into an ADP column.`,
     );
   }
