@@ -179,7 +179,12 @@ async function main() {
   console.log('\nwritten:');
   for (const [t, n] of Object.entries(counts)) console.log(`  ${t.padEnd(16)} ${n}`);
 
-  for (const t of EXPORTED_TABLES) await exportParquet(conn, t, SILVER);
+  // Guarded: the export overwrites the committed history wholesale, so it must
+  // refuse to drop a capture date. `players` is exempt — it is current-state by
+  // design (see replaceAll), so its single captured_at moves forward every run.
+  for (const t of EXPORTED_TABLES) {
+    await exportParquet(conn, t, SILVER, { guardHistory: t !== 'players' });
+  }
 
   const days = await conn.runAndReadAll(
     'SELECT count(DISTINCT captured_at) AS d, min(captured_at) AS lo, max(captured_at) AS hi FROM adp_snapshots',

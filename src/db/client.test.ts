@@ -3,7 +3,9 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { GOLD } from '../config.js';
-import { exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay } from './client.js';
+import {
+  assertNoHistoryLoss, exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay,
+} from './client.js';
 import type { DuckDBConnection } from '@duckdb/node-api';
 
 /**
@@ -94,5 +96,92 @@ describe('persistence', () => {
     // once a second day landed.
     assert.equal(await count('adp_snapshots'), 20, 'base table = full history');
     assert.equal(await count('adp_current'), 10, 'view = latest snapshot only');
+  });
+});
+
+/**
+ * The export overwrites the committed Parquet wholesale, so a database holding
+ * fewer days than the file on disk will silently delete history that cannot be
+ * re-fetched. These pin the refusal.
+ */
+describe('export history guard', () => {
+  const DB2 = `test-guard-${process.pid}.duckdb`;
+  const DIR2 = path.join(GOLD, `test-guard-parquet-${process.pid}`);
+  let c2: DuckDBConnection;
+
+  before(async () => {
+    c2 = await openDb(DB2);
+    await fs.mkdir(DIR2, { recursive: true });
+    for (const d of ['2026-08-01', '2026-08-02', '2026-08-03']) {
+      await replaceDay(c2, 'adp_snapshots', ADP_COLS, adpRows(d, 5), d);
+    }
+    await exportParquet(c2, 'adp_snapshots', DIR2);
+  });
+
+  after(async () => {
+    await fs.rm(path.join(GOLD, DB2), { force: true });
+    await fs.rm(DIR2, { recursive: true, force: true });
+  });
+
+  test('first ever export has nothing to lose', async () => {
+    await assert.doesNotReject(() => assertNoHistoryLoss(c2, 'ecr_snapshots', DIR2));
+  });
+
+  test('exporting the same days again is fine', async () => {
+    await assert.doesNotReject(() => assertNoHistoryLoss(c2, 'adp_snapshots', DIR2));
+  });
+
+  test('adding a day is fine — the guard blocks loss, not growth', async () => {
+    await replaceDay(c2, 'adp_snapshots', ADP_COLS, adpRows('2026-08-04', 5), '2026-08-04');
+    await assert.doesNotReject(() => exportParquet(c2, 'adp_snapshots', DIR2));
+  });
+
+  test('rewriting a day with different rows is fine', async () => {
+    // Re-running today's ingest legitimately replaces the day.
+    await replaceDay(c2, 'adp_snapshots', ADP_COLS, adpRows('2026-08-04', 40), '2026-08-04');
+    await assert.doesNotReject(() => exportParquet(c2, 'adp_snapshots', DIR2));
+  });
+
+  test('a DB missing a committed day REFUSES to export (the data-loss bug)', async () => {
+    // Exactly the local-vs-CI divergence: the DB never picked up 08-02, so the
+    // export would drop it from the committed history forever.
+    await c2.run("DELETE FROM adp_snapshots WHERE captured_at = DATE '2026-08-02'");
+    await assert.rejects(
+      () => exportParquet(c2, 'adp_snapshots', DIR2),
+      /refusing to export.*2026-08-02/s,
+    );
+  });
+
+  test('the refusal names every missing day, not just the first', async () => {
+    await c2.run("DELETE FROM adp_snapshots WHERE captured_at = DATE '2026-08-03'");
+    await assert.rejects(
+      () => exportParquet(c2, 'adp_snapshots', DIR2),
+      (e: Error) =>
+        /2026-08-02/.test(e.message) && /2026-08-03/.test(e.message) && /2 capture date/.test(e.message),
+    );
+  });
+
+  test('a refused export leaves the file on disk untouched', async () => {
+    // The whole point: the committed history must survive the failure.
+    const check = await c2.runAndReadAll(
+      `SELECT count(DISTINCT captured_at) AS n FROM read_parquet('${path.join(DIR2, 'adp_snapshots.parquet')}')`,
+    );
+    assert.equal(Number((check.getRowObjectsJson() as { n: string }[])[0]!.n), 4,
+      'the parquet must still hold all 4 days after two refused exports');
+  });
+
+  test('dimension tables can opt out — their single day moves forward by design', async () => {
+    await replaceAll(c2, 'players', PLAYER_COLS, playerRows('2026-08-01', 5));
+    await exportParquet(c2, 'players', DIR2, { guardHistory: false });
+    await replaceAll(c2, 'players', PLAYER_COLS, playerRows('2026-08-09', 5));
+    await assert.doesNotReject(
+      () => exportParquet(c2, 'players', DIR2, { guardHistory: false }),
+      'players is current-state, so replacing its captured_at is not history loss',
+    );
+    // And it WOULD be blocked if someone forgot the opt-out — proving the
+    // default is the safe one. (The file now holds 08-09; move the table to
+    // 08-10 so the guarded export actually has a day to lose.)
+    await replaceAll(c2, 'players', PLAYER_COLS, playerRows('2026-08-10', 5));
+    await assert.rejects(() => exportParquet(c2, 'players', DIR2), /refusing to export/);
   });
 });
