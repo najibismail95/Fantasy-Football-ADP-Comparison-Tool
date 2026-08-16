@@ -129,7 +129,8 @@ export async function assertNoHistoryLoss(
       `The Parquet on disk holds days this database does not, and the export overwrites it wholesale. ` +
       `Daily ADP cannot be re-fetched, so this is permanent. ` +
       `Most likely this database is stale — it missed days that CI captured. ` +
-      `Delete data/gold/fantasy.duckdb and re-run: it will rehydrate from the committed Parquet first.`,
+      `Re-run the ingest: hydrateFromParquet merges any missing dates back in before the export. ` +
+      `If it still fails, the Parquet holds dates that no longer exist anywhere else — investigate before forcing.`,
   );
 }
 
@@ -153,13 +154,28 @@ export async function exportParquet(
 }
 
 /**
- * Reload prior history from the committed Parquet into an empty database.
+ * Merge prior history from the committed Parquet into the database, one capture
+ * date at a time. Returns the number of rows ADDED per table.
  *
  * CI runners are ephemeral: the .duckdb file is gitignored and does not exist
  * on a fresh machine, but data/silver/*.parquet is committed. Without this
  * step the run would write a single day and then export it over the whole
  * accumulated history — silently destroying a time series that cannot be
  * rebuilt, since nobody publishes historical daily ADP.
+ *
+ * ⚠️ This used to skip the load entirely whenever the table already held rows,
+ * which was only ever safe on CI. A laptop keeps its .duckdb between runs, so
+ * the days CI committed while you weren't running never arrived — and since
+ * exportParquet overwrites wholesale, the next local ingest wrote a SHORTER
+ * history over the committed one. Four days (2026-08-08/09/11/12) were one
+ * `git add data/silver` away from being deleted that way.
+ *
+ * Merging per date fixes the cause; assertNoHistoryLoss above is the backstop
+ * for whatever causes it next.
+ *
+ * Days already in the table are left alone rather than replaced: the table is
+ * the fresher copy (today's ingest has already written it), and replaceDay owns
+ * rewriting a date.
  *
  * INSERT ... BY NAME matches columns by name, so adding a column to the schema
  * later doesn't break loading older Parquet (new columns come back NULL).
@@ -177,13 +193,26 @@ export async function hydrateFromParquet(
     } catch {
       continue; // first ever run for this table
     }
-    const existing = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${table}`);
-    const rows = existing.getRowObjectsJson() as { n: string | number }[];
-    if (Number(rows[0]?.n ?? 0) > 0) continue; // already populated — don't double-load
 
-    await conn.run(`INSERT INTO ${table} BY NAME SELECT * FROM read_parquet('${file}')`);
+    // Read the day set first rather than referencing the target table inside
+    // the INSERT's own SELECT, so there is no question about self-reference
+    // semantics mid-statement.
+    const have = await conn.runAndReadAll(`SELECT DISTINCT captured_at AS d FROM ${table}`);
+    const days = (have.getRowObjectsJson() as { d: string }[]).map((r) => r.d);
+    const exclude = days.length
+      ? `WHERE captured_at NOT IN (${days.map((d) => `DATE '${d}'`).join(',')})`
+      : '';
+
+    const before = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${table}`);
+    const n0 = Number((before.getRowObjectsJson() as { n: string | number }[])[0]?.n ?? 0);
+
+    await conn.run(
+      `INSERT INTO ${table} BY NAME SELECT * FROM read_parquet('${file}') ${exclude}`,
+    );
+
     const after = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${table}`);
-    loaded[table] = Number((after.getRowObjectsJson() as { n: string | number }[])[0]?.n ?? 0);
+    const added = Number((after.getRowObjectsJson() as { n: string | number }[])[0]?.n ?? 0) - n0;
+    if (added > 0) loaded[table] = added;
   }
   return loaded;
 }
