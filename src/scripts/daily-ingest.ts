@@ -3,7 +3,7 @@ import { today } from '../lib/bronze.js';
 import { Crosswalk } from '../resolve/crosswalk.js';
 import { fetchState, ingestSleeperSpine } from '../ingest/sleeper.js';
 import { fetchEspn, parseEspn } from '../ingest/espn.js';
-import { fetchBeatAdp, parseBeatAdp } from '../ingest/beatadp.js';
+import { fetchBeatAdp, parseBeatAdp, type BeatAdpResult } from '../ingest/beatadp.js';
 import { fetchFantasyPros, parseFantasyPros, type FantasyProsFormat } from '../ingest/fantasypros.js';
 import {
   fetchSleeperProjections, parseSleeperProjections, parseSleeperAdp,
@@ -59,7 +59,27 @@ async function main() {
   const espn = parseEspn(espnRaw, xwalk, state.season);
   console.log(`espn team map: ${xwalk.espnTeamCount} teams derived`);
 
-  const beat = parseBeatAdp(await fetchBeatAdp(captureDate), xwalk);
+  // STOPGAP (2026-08-16): beatadp redeployed and the RSC payload no longer
+  // matches ROW_RE, so the parse throws and takes the whole run with it. That
+  // cost 2026-08-16 outright — including the ESPN and Sleeper ADP that parsed
+  // fine — and daily ADP cannot be backfilled. Degrade this one source to a
+  // warning until it is replaced by a real API (Yahoo's pub-api-ro carries
+  // average_pick and average_cost without OAuth).
+  //
+  // Deliberately NOT generalised to every source: a source vanishing silently
+  // is normally a stop-the-run event, and the FANTASYPROS ADP this supplies is
+  // what keeps deep rounds gradeable (buildConsensusAdp needs 2 sources after
+  // censoring, and ESPN censors past its ceiling). Days captured while this is
+  // warning will have thin coverage past ~round 15. Remove with beatadp itself.
+  let beat: BeatAdpResult = { adp: [], unresolved: [], rowsSeen: 0 };
+  try {
+    beat = parseBeatAdp(await fetchBeatAdp(captureDate), xwalk);
+  } catch (err) {
+    console.error(
+      `\n!!  beatadp SKIPPED (FantasyPros ADP missing for this capture): ` +
+        `${err instanceof Error ? err.message : String(err)}\n`,
+    );
+  }
 
   // Second projection source. Keyed by Sleeper player_id, so it joins to the
   // spine directly with no crosswalk. ESPN alone compresses the middle of each
