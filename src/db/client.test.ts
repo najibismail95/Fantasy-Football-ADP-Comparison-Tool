@@ -84,11 +84,32 @@ describe('persistence', () => {
     assert.equal(await days('adp_snapshots'), 2, 'hydrate must restore every DAY');
   });
 
-  test('hydrate does not double-load an already-populated table', async () => {
+  test('hydrate does not duplicate days it already holds', async () => {
     const before_ = await count('adp_snapshots');
     const loaded = await hydrateFromParquet(conn, ['adp_snapshots'], TMP_PARQUET);
-    assert.deepEqual(loaded, {}, 'a populated table must be skipped');
-    assert.equal(await count('adp_snapshots'), before_);
+    assert.deepEqual(loaded, {}, 'nothing to add when every day is already present');
+    assert.equal(await count('adp_snapshots'), before_, 're-hydrating must not double rows');
+  });
+
+  test('hydrate MERGES days the database is missing (the local-vs-CI divergence)', async () => {
+    // The bug: hydrate used to skip entirely whenever the table had any rows.
+    // On CI that was harmless — the DB is always empty on a fresh runner. On a
+    // laptop the .duckdb file persists, so the days CI committed while you
+    // weren't running never arrived, and the next export wrote a SHORTER
+    // history over the committed one. Four days died that way.
+    //
+    // The parquet here holds 07-27 and 07-28. Drop 07-27 from the table to
+    // stand in for a day the local DB never saw, and hydrate must bring it back
+    // without touching the day already present.
+    await conn.run("DELETE FROM adp_snapshots WHERE captured_at = DATE '2026-07-27'");
+    assert.equal(await days('adp_snapshots'), 1, 'precondition: one day missing');
+    const rowsBefore = await count('adp_snapshots');
+
+    const loaded = await hydrateFromParquet(conn, ['adp_snapshots'], TMP_PARQUET);
+
+    assert.equal(await days('adp_snapshots'), 2, 'the missing day must be restored');
+    assert.equal(await count('adp_snapshots'), rowsBefore + 10, 'only the missing day is added');
+    assert.equal(loaded['adp_snapshots'], 10, 'reports rows ADDED, not the table total');
   });
 
   test('the *_current view exposes one day, the base table exposes all', async () => {
