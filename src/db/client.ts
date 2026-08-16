@@ -84,8 +84,68 @@ export async function replaceAll(
   return rows.length;
 }
 
-/** Mirror a table to Parquet so the app can query it over HTTPS without a server. */
-export async function exportParquet(conn: DuckDBConnection, table: string, dir: string) {
+/**
+ * Refuses to overwrite a Parquet export that would DROP capture dates.
+ *
+ * The export is a wholesale overwrite, so whatever is in the database at that
+ * moment becomes the entire committed history. That is only safe while the
+ * database is a superset of what is already on disk — and nothing guarantees
+ * it is. A local run whose DB never picked up the days CI committed will
+ * happily export a shorter series, and committing it deletes those days for
+ * good. Daily ADP is a snapshot: no source will sell it back to us.
+ *
+ * So the day set is treated as append-only. Days may be added or rewritten;
+ * they may never vanish.
+ *
+ * Deliberately NOT checked: row counts within a day. Those legitimately move
+ * (Sleeper's coverage went 311 -> 804 mid-season, and a source outage can push
+ * the other way), so guarding them would fire on healthy data. A day that
+ * empties out entirely still trips this check — it drops out of the day set.
+ */
+export async function assertNoHistoryLoss(
+  conn: DuckDBConnection,
+  table: string,
+  dir: string,
+): Promise<void> {
+  const file = path.join(dir, `${table}.parquet`);
+  try {
+    await fs.access(file);
+  } catch {
+    return; // nothing on disk yet, so nothing to lose
+  }
+
+  const missing = await conn.runAndReadAll(
+    `SELECT DISTINCT p.captured_at AS d
+       FROM read_parquet('${file}') p
+      WHERE NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.captured_at = p.captured_at)
+      ORDER BY 1`,
+  );
+  const days = (missing.getRowObjectsJson() as { d: string }[]).map((r) => r.d);
+  if (days.length === 0) return;
+
+  const shown = days.slice(0, 8).join(', ') + (days.length > 8 ? `, +${days.length - 8} more` : '');
+  throw new Error(
+    `[${table}] refusing to export: ${days.length} capture date(s) would be deleted (${shown}). ` +
+      `The Parquet on disk holds days this database does not, and the export overwrites it wholesale. ` +
+      `Daily ADP cannot be re-fetched, so this is permanent. ` +
+      `Most likely this database is stale — it missed days that CI captured. ` +
+      `Delete data/gold/fantasy.duckdb and re-run: it will rehydrate from the committed Parquet first.`,
+  );
+}
+
+/**
+ * Mirror a table to Parquet so the app can query it over HTTPS without a server.
+ *
+ * Guarded by default — see assertNoHistoryLoss. Opting out is only correct for
+ * dimension tables, whose single captured_at moves forward on every run.
+ */
+export async function exportParquet(
+  conn: DuckDBConnection,
+  table: string,
+  dir: string,
+  { guardHistory = true } = {},
+) {
+  if (guardHistory) await assertNoHistoryLoss(conn, table, dir);
   await fs.mkdir(dir, { recursive: true });
   await conn.run(
     `COPY (SELECT * FROM ${table}) TO '${path.join(dir, `${table}.parquet`)}' (FORMAT PARQUET)`,
