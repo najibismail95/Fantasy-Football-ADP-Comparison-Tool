@@ -1,7 +1,3 @@
-
-> fantasy-adp@0.1.0 report:md
-> tsx src/scripts/report.ts --markdown
-
 # Fantasy ADP report — 2026-08-17
 
 _Snapshot 2026-08-17 · 21 days of history collected. Generated automatically by the daily ingest workflow._
