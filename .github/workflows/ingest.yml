@@ -8,7 +8,8 @@ on:
   workflow_dispatch: # lets you trigger a run by hand from the Actions tab
 
 permissions:
-  contents: write # needed to commit the day's Parquet back to the repo
+  contents: write # commit the day's Parquet + REPORT.md back to the repo
+  issues: write # open an issue when a run fails — see the last step
 
 # Never let two runs write the day's snapshot at once.
 concurrency:
@@ -48,11 +49,32 @@ jobs:
           retention-days: 14
           if-no-files-found: ignore
 
+      # Written twice on purpose: REPORT.md gets committed so the current
+      # picture is browsable on the repo front page, and the same content goes
+      # to the run summary so every historical run stays readable in the
+      # Actions tab without cloning anything.
+      #
+      # continue-on-error because this is presentation, and the step below it
+      # is not: the day's ADP cannot be re-fetched tomorrow, so a bug in report
+      # rendering must never be what stops it being committed. A failure here
+      # shows as a warning annotation on the run and leaves the previous
+      # REPORT.md in place.
+      #
+      # Rendered to a temp file first for the same reason — `>` truncates
+      # before the command runs, so writing REPORT.md directly would replace a
+      # good report with a half-written one the moment the script threw.
+      - name: Build report
+        continue-on-error: true
+        run: |
+          npm run report:md > "$RUNNER_TEMP/report.md"
+          mv "$RUNNER_TEMP/report.md" REPORT.md
+          cat REPORT.md >> "$GITHUB_STEP_SUMMARY"
+
       - name: Commit snapshot
         run: |
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add data/silver
+          git add data/silver REPORT.md
           if git diff --staged --quiet; then
             echo "No change in the Parquet exports — nothing to commit."
             exit 0
@@ -61,3 +83,36 @@ jobs:
           # Someone may have pushed while this ran; rebase rather than fail.
           git pull --rebase --autostash origin main
           git push
+
+      # A failed run is not just a red X — daily ADP cannot be backfilled, so
+      # every day this silently fails is a permanent hole in the history. That
+      # is exactly how 2026-08-14 was lost: the run failed, nobody was watching
+      # the Actions tab, and by the time it was noticed the data was gone.
+      #
+      # Reuses a single open issue rather than filing a new one per day, so a
+      # week-long outage doesn't bury the inbox in seven near-identical issues.
+      - name: Report failure
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: 'Daily ingest is failing'
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          BODY="The scheduled ADP ingest failed on $(date -u +%Y-%m-%d).
+
+          **Daily ADP cannot be backfilled** — each day this stays broken is a
+          permanent gap in the history. Raw payloads from the failed run are
+          attached to it as the \`bronze-${{ github.run_id }}\` artifact
+          (kept 14 days), which is usually enough to tell a source outage
+          apart from a parser that needs updating.
+
+          Failed run: $RUN_URL"
+
+          EXISTING=$(gh issue list --state open --search "$TITLE in:title" \
+            --json number --jq '.[0].number // empty')
+
+          if [ -n "$EXISTING" ]; then
+            gh issue comment "$EXISTING" --body "$BODY"
+          else
+            gh issue create --title "$TITLE" --body "$BODY"
+          fi

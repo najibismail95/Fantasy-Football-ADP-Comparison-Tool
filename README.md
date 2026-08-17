@@ -87,9 +87,24 @@ Projections are blended across ESPN and Sleeper (simple average). ESPN alone com
 
 ## Automation
 
-`.github/workflows/` runs `npm run ingest` daily (11:15 UTC) and commits the resulting Parquet straight back to `data/silver/`. That's what makes the history usable at all: none of these sources publish historical daily ADP, so a day that isn't captured is gone for good. `workflow_dispatch` lets you trigger a run by hand from the Actions tab.
+Two workflows, both in `.github/workflows/`:
 
-The ingest is guarded against overwriting that history with something worse than what's already committed — see the first two items below.
+**`ingest.yml`** runs `npm run ingest` daily (11:15 UTC), then commits the resulting Parquet and a freshly generated `REPORT.md` back to the repo. That's what makes the history usable at all: none of these sources publish historical daily ADP, so a day that isn't captured is gone for good. `workflow_dispatch` lets you trigger a run by hand from the Actions tab.
+
+**`ci.yml`** runs typecheck and the test suite on every pull request and every push to `main`.
+
+### Reading the output without cloning anything
+
+- **[REPORT.md](./REPORT.md)** — regenerated every run and committed, so the current picture is one click from the repo front page. Its git history doubles as a day-by-day record of how the market moved.
+- **Actions → any run → job summary** — the same report rendered on the run itself, so past days stay readable without digging through commits.
+
+Both come from `npm run report:md`, which is just `npm run report` with Markdown tables instead of terminal box-drawing — identical numbers, same code path.
+
+### When it breaks
+
+A failed run isn't only a red X: a missed day is a permanent hole, because ADP can't be backfilled. So a failure opens a GitHub issue (reusing one open issue rather than filing a new one daily) and attaches the raw payloads as an artifact for 14 days, which is usually enough to tell a source outage apart from a parser that needs updating.
+
+The ingest is also guarded against overwriting good history with something worse — see the first two items below.
 
 ## Things that will bite you
 

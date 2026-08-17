@@ -1,0 +1,46 @@
+name: CI
+
+# Runs on every PR and every push to main. Until this existed, nothing verified
+# a change automatically — the test suite was only ever run by hand before
+# merging, which is fine right up until the once it isn't.
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+# Read-only: this job never writes to the repo, unlike the ingest workflow.
+permissions:
+  contents: read
+
+# A new push supersedes the previous run on the same branch — no point
+# finishing a check on a commit that's already been replaced.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests
+        run: npm test
+
+      # The ingest itself is NOT run here: it hits four live third-party APIs,
+      # and running it on every push would mean hammering them on every commit
+      # for no added signal. `--dry-run` fetches and parses without writing,
+      # which is the part worth checking — but it still costs real requests, so
+      # it's deliberately left to the scheduled job and manual runs.
