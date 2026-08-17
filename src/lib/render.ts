@@ -14,9 +14,14 @@
 
 export const MARKDOWN = process.argv.includes('--markdown');
 
-/** Section header: `=== x ===` in a terminal, `## x` in Markdown. */
-export function heading(text: string): void {
-  console.log(MARKDOWN ? `\n## ${text}\n` : `=== ${text} ===`);
+/**
+ * Section header: `=== x ===` in a terminal, `## x` in Markdown.
+ *
+ * `level` only affects Markdown — a terminal has no heading hierarchy, so
+ * nesting there would just be noise.
+ */
+export function heading(text: string, level = 2): void {
+  console.log(MARKDOWN ? `\n${'#'.repeat(level)} ${text}\n` : `=== ${text} ===`);
 }
 
 /** Plain line in a terminal; italicised note in Markdown. */
