@@ -95,10 +95,10 @@ Two workflows, both in `.github/workflows/`:
 
 ### Reading the output without cloning anything
 
-- **[REPORT.md](./REPORT.md)** — regenerated every run and committed, so the current picture is one click from the repo front page. Its git history doubles as a day-by-day record of how the market moved.
-- **Actions → any run → job summary** — the same report rendered on the run itself, so past days stay readable without digging through commits.
+- **[REPORT.md](./REPORT.md)** — regenerated every run and committed, so the current picture is one click from the repo front page. Its git history doubles as a day-by-day record of how the market moved. Carries the full report *and* the value board for QB/RB/WR/TE.
+- **Actions → any run → job summary** — the same content rendered on the run itself, so past days stay readable without digging through commits.
 
-Both come from `npm run report:md`, which is just `npm run report` with Markdown tables instead of terminal box-drawing — identical numbers, same code path.
+Both come from `npm run report:md` and `npm run values:md` — the same `report` and `values` you'd run locally, with Markdown tables instead of terminal box-drawing. Identical numbers, same code path.
 
 ### When it breaks
 

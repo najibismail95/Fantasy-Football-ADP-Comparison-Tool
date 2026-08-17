@@ -5,6 +5,7 @@ import { computeVorp, computeValueScore } from '../metrics/vorp.js';
 import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
 import { roundOf, roundNumber } from '../metrics/rounds.js';
+import { heading, note, table, MARKDOWN } from '../lib/render.js';
 
 /**
  * "Find me value QBs in the late rounds" — for any position, any round range.
@@ -13,7 +14,10 @@ import { roundOf, roundNumber } from '../metrics/rounds.js';
  * npm run values          -> all positions, whole board
  */
 
-const [, , posArg, minArg, maxArg] = process.argv;
+// Flags are stripped before positional parsing, or `--markdown` lands in the
+// position slot and silently filters for a position named "--MARKDOWN" —
+// producing an empty board rather than an error. Same pattern as tiers.ts.
+const [posArg, minArg, maxArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const posFilter = posArg?.toUpperCase();
 const roundMin = minArg ? Number(minArg) : 1;
 const roundMax = maxArg ? Number(maxArg) : 30;
@@ -65,14 +69,21 @@ for (const r of rawProj) {
 const cfg: LeagueConfig = DEFAULT_CONFIG;
 const repl = replacementLevels(projRows, cfg);
 
-console.log(`\nleague: ${cfg.teams}-team ${cfg.scoring}, ` +
+const leagueLine =
+  `${cfg.teams}-team ${cfg.scoring}, ` +
   `${cfg.starters.qb}QB/${cfg.starters.rb}RB/${cfg.starters.wr}WR/${cfg.starters.te}TE` +
   `${cfg.starters.flex ? `/${cfg.starters.flex}FLEX` : ''}` +
-  `${cfg.starters.superflex ? `/${cfg.starters.superflex}SFLEX` : ''}\n`);
+  `${cfg.starters.superflex ? `/${cfg.starters.superflex}SFLEX` : ''}`;
 
-console.log('replacement level:');
-for (const [pos, r] of Object.entries(repl)) {
-  console.log(`  ${pos.padEnd(4)} ${pos}${r.startersUsed + 1} baseline, ${r.points.toFixed(0)} pts`);
+// Terminal only: in Markdown this is folded into a one-line note below the
+// heading, since a committed report shouldn't open with eight lines of setup
+// before the first thing worth reading.
+if (!MARKDOWN) {
+  console.log(`\nleague: ${leagueLine}\n`);
+  console.log('replacement level:');
+  for (const [pos, r] of Object.entries(repl)) {
+    console.log(`  ${pos.padEnd(4)} ${pos}${r.startersUsed + 1} baseline, ${r.points.toFixed(0)} pts`);
+  }
 }
 
 const vorpRows = computeVorp(projRows, repl);
@@ -110,40 +121,72 @@ const nameByPlayer = new Map(
   }[]).map((r) => [r.playerId, r.name]),
 );
 
-const results = values
-  .filter((v) => !posFilter || v.pos === posFilter)
-  // Filter on the INTEGER round, not the fractional position: "rounds 9-16"
-  // means every pick in those rounds. Comparing the fractional roundOf against
-  // roundMax would cut at 16.0 (pick 181) and drop the rest of round 16.
-  .filter((v) => {
-    const rd = roundNumber(v.adp, cfg.teams);
-    return rd >= roundMin && rd <= roundMax;
-  })
-  .sort((a, b) => b.valueScore - a.valueScore)
-  .slice(0, 15);
+const TOP_N = 15;
 
-console.log(`\n${posFilter ?? 'ALL'} · rounds ${roundMin}-${roundMax} · sorted by value score:\n`);
-console.log(
-  `espn_pts/sleeper_pts: each source's own ${cfg.scoring} projection — compare ` +
-    "them yourself; edge_pts is how far the blend of the two beats (+) or " +
-    'misses (-) what a typical player at his ADP slot produces.\n',
-);
-if (droppedForThinData > 0) {
-  console.log(
-    `(${droppedForThinData} players excluded league-wide: fewer than 2 real ADP sources ` +
-      `after removing values censored at a source's ceiling)\n`,
+/**
+ * Positions listed when rendering the whole board for the daily report. K and
+ * DEF are left out for the same reason they're excluded from the arbitrage
+ * table: their ADP swings are large and nobody drafts off a kicker value board.
+ */
+const REPORT_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const;
+
+const board = (pos?: string) =>
+  values
+    .filter((v) => !pos || v.pos === pos)
+    // Filter on the INTEGER round, not the fractional position: "rounds 9-16"
+    // means every pick in those rounds. Comparing the fractional roundOf against
+    // roundMax would cut at 16.0 (pick 181) and drop the rest of round 16.
+    .filter((v) => {
+      const rd = roundNumber(v.adp, cfg.teams);
+      return rd >= roundMin && rd <= roundMax;
+    })
+    .sort((a, b) => b.valueScore - a.valueScore)
+    .slice(0, TOP_N)
+    .map((r) => ({
+      player: nameByPlayer.get(r.playerId) ?? r.playerId,
+      pos: r.pos,
+      adp: Number(r.adp.toFixed(1)),
+      round: Number(roundOf(r.adp, cfg.teams).toFixed(1)),
+      drafted_as: `${r.pos}${r.adpRank}`,
+      produces_like: `${r.pos}${r.vorpRank}`,
+      espn_pts: rawPtsByPlayer.get(r.playerId)?.ESPN?.toFixed(0) ?? '—',
+      sleeper_pts: rawPtsByPlayer.get(r.playerId)?.SLEEPER?.toFixed(0) ?? '—',
+      edge_pts: `${r.valueScore >= 0 ? '+' : ''}${r.valueScore.toFixed(1)}`,
+    }));
+
+// Column names are backticked in Markdown: they contain underscores, and bare
+// underscores inside the italicised note below are ambiguous emphasis markers.
+// Code formatting is the right rendering for a column name anyway.
+const col = (name: string) => (MARKDOWN ? `\`${name}\`` : name);
+const legend =
+  `${col('espn_pts')}/${col('sleeper_pts')}: each source's own ${cfg.scoring} ` +
+  `projection — compare them yourself; ${col('edge_pts')} is how far the blend ` +
+  'of the two beats (+) or misses (-) what a typical player at his ADP slot produces.';
+const thinDataNote =
+  `${droppedForThinData} players excluded league-wide: fewer than 2 real ADP ` +
+  `sources after removing values censored at a source's ceiling.`;
+
+// One pass over the already-computed board per position, rather than four
+// separate invocations of this script — the expensive part (projections, VORP,
+// consensus ADP) is identical for every position and only worth doing once.
+if (MARKDOWN && !posFilter) {
+  heading('Value board');
+  note(
+    `${leagueLine}. Replacement level: ` +
+      Object.entries(repl)
+        .map(([pos, r]) => `${pos}${r.startersUsed + 1} ${r.points.toFixed(0)}pts`)
+        .join(', ') +
+      '.',
   );
+  note(legend);
+  if (droppedForThinData > 0) note(thinDataNote);
+  for (const pos of REPORT_POSITIONS) {
+    heading(pos, 3);
+    table(board(pos));
+  }
+} else {
+  console.log(`\n${posFilter ?? 'ALL'} · rounds ${roundMin}-${roundMax} · sorted by value score:\n`);
+  console.log(`${legend}\n`);
+  if (droppedForThinData > 0) console.log(`(${thinDataNote})\n`);
+  table(board(posFilter));
 }
-console.table(
-  results.map((r) => ({
-    player: nameByPlayer.get(r.playerId) ?? r.playerId,
-    pos: r.pos,
-    adp: Number(r.adp.toFixed(1)),
-    round: Number(roundOf(r.adp, cfg.teams).toFixed(1)),
-    drafted_as: `${r.pos}${r.adpRank}`,
-    produces_like: `${r.pos}${r.vorpRank}`,
-    espn_pts: rawPtsByPlayer.get(r.playerId)?.ESPN?.toFixed(0) ?? '—',
-    sleeper_pts: rawPtsByPlayer.get(r.playerId)?.SLEEPER?.toFixed(0) ?? '—',
-    edge_pts: `${r.valueScore >= 0 ? '+' : ''}${r.valueScore.toFixed(1)}`,
-  })),
-);
