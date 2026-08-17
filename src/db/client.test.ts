@@ -33,6 +33,13 @@ const playerRows = (date: string, n: number) =>
     espn_id: null, search_rank: i, active: true, captured_at: date,
   }));
 
+const UNRESOLVED_COLS = ['source', 'source_id', 'source_name', 'position', 'team', 'reason', 'captured_at'] as const;
+const unresolvedRows = (date: string, n: number) =>
+  Array.from({ length: n }, (_, i) => ({
+    source: 'ESPN', source_id: `u${i}`, source_name: `Unresolved ${i}`,
+    position: 'WR', team: null, reason: 'no match in spine', captured_at: date,
+  }));
+
 let conn: DuckDBConnection;
 const count = async (t: string) =>
   Number(((await conn.runAndReadAll(`SELECT count(*) AS n FROM ${t}`)).getRowObjectsJson() as { n: string }[])[0]!.n);
@@ -118,6 +125,26 @@ describe('persistence', () => {
     // once a second day landed.
     assert.equal(await count('adp_snapshots'), 20, 'base table = full history');
     assert.equal(await count('adp_current'), 10, 'view = latest snapshot only');
+  });
+
+  test('unresolved_current stays anchored to TODAY even when today resolved perfectly', async () => {
+    // Regression: unresolved_current used to self-reference MAX(captured_at)
+    // FROM unresolved. replaceDay leaves no row at all for a date with nothing
+    // to write, so a day with ZERO unresolved players — the success case —
+    // has no row for that date, and self-referencing MAX skips straight past
+    // it to the last day that DID have unresolved rows. Once a source stops
+    // being ingested, that freezes "current" on that source's old entries
+    // forever, even after weeks of clean resolution.
+    //
+    // adp_snapshots already sits at 2026-07-28 (20 rows across two days, from
+    // earlier tests in this file). Give unresolved some old rows on 07-27
+    // only — 07-28 resolved everything, so nothing was ever written for it.
+    await replaceDay(conn, 'unresolved', UNRESOLVED_COLS, unresolvedRows('2026-07-27', 3), '2026-07-27');
+    assert.equal(await days('adp_snapshots'), 2, 'precondition: today is 07-28');
+    assert.equal(await count('unresolved'), 3, 'precondition: only 07-27 has rows');
+
+    assert.equal(await count('unresolved_current'), 0,
+      "today (07-28, no unresolved) must show empty, not fall back to 07-27's stale rows");
   });
 });
 

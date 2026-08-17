@@ -1,10 +1,8 @@
 import { openDb } from '../db/client.js';
 import { DEFAULT_CONFIG, type LeagueConfig } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
-import { computeVorp, computeValueScore, gradeValueScores } from '../metrics/vorp.js';
-import {
-  buildConsensusAdp, expertConfidence, projectionConfidence, type RawAdpRow,
-} from '../metrics/confidence.js';
+import { computeVorp, computeValueScore } from '../metrics/vorp.js';
+import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
 import { roundOf, roundNumber } from '../metrics/rounds.js';
 
@@ -24,9 +22,22 @@ const roundMax = maxArg ? Number(maxArg) : 30;
 const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
 
-// Blended across ESPN + Sleeper. ESPN alone compresses the middle of each
-// position (RB5-RB14 inside 20 points, six within one point), which made both
-// tiers and value scores mush. See metrics/projections.ts.
+// Blended across ESPN + Sleeper ONLY. Yahoo has no third projection to add
+// here — checked directly: its public pub-api-ro endpoint carries no points
+// field at all (only draft_analysis: average_pick, average_cost,
+// percent_drafted), and its own draftanalysis page shows ADP only for free
+// users, with deeper columns paywalled behind Yahoo Fantasy Plus. The
+// projected points Yahoo shows inside an actual (mock) draft room live behind
+// a login session, not the public endpoint this project uses — pulling those
+// would mean storing Yahoo login credentials in CI and automating against an
+// authenticated session, which is a different risk category than every other
+// source here (all public, no login, ToS-friendlier) and was deliberately
+// not done. See ingest/yahoo.ts for what Yahoo DOES contribute: adp + auction
+// value, both real and public.
+//
+// ESPN alone compresses the middle of each position (RB5-RB14 inside 20
+// points, six within one point), which made both tiers and value scores mush.
+// See metrics/projections.ts.
 const rawProj = (await q(`
   SELECT pr.player_id AS "playerId", pr.source, pr.scoring, pr.proj_points AS points,
          p.position AS pos
@@ -41,9 +52,15 @@ const projRows: ProjectedPlayer[] = blended.map((b) => ({
   pos: posByPlayer.get(b.playerId) as ProjectedPlayer['pos'],
   points: b.points,
 }));
-// Kept for projectionConfidence below — how far ESPN and Sleeper's raw
-// projections disagreed for this player, before they got averaged away.
-const spreadByPlayer = new Map(blended.map((b) => [b.playerId, { spread: b.spread, sources: b.sources }]));
+// Shown as their own columns below rather than folded into edge_pts, so a
+// player where the two disagree (e.g. Tyjae Spears: ESPN 154 / Sleeper 115)
+// is visible directly instead of behind a flag on the blended number.
+const rawPtsByPlayer = new Map<string, Record<string, number>>();
+for (const r of rawProj) {
+  let bySource = rawPtsByPlayer.get(r.playerId);
+  if (!bySource) rawPtsByPlayer.set(r.playerId, (bySource = {}));
+  bySource[r.source] = r.points;
+}
 
 const cfg: LeagueConfig = DEFAULT_CONFIG;
 const repl = replacementLevels(projRows, cfg);
@@ -79,12 +96,12 @@ const valueInput = vorpRows
   .filter((v) => adpByPlayer.has(v.playerId))
   .map((v) => ({ playerId: v.playerId, pos: v.pos, vorp: v.vorp, adp: adpByPlayer.get(v.playerId)! }));
 
-// Grade on the FULL position pool, before any round-range filter. A grade has
-// to mean the same thing regardless of what range you happen to query — and
-// curving an already-cherry-picked top-15 would push good values down to a
-// C purely because they're being compared only to other good values.
+// Ranked on the FULL position pool, before any round-range filter. adpRank
+// and vorpRank have to mean the same thing regardless of what range you
+// happen to query — ranking an already-cherry-picked top-15 would make
+// everyone look average purely because they're being compared only to other
+// good values.
 const values = computeValueScore(valueInput);
-const graded = gradeValueScores(values);
 
 const nameByPlayer = new Map(
   ((await q(`SELECT player_id AS "playerId", display_name AS name FROM players`)) as {
@@ -93,41 +110,7 @@ const nameByPlayer = new Map(
   }[]).map((r) => [r.playerId, r.name]),
 );
 
-// Two INDEPENDENT confidence checks, both flags rather than filters — unlike
-// the censored/single-source ADP dropped above (bad input), disagreement is
-// real information about a player, not corrupted data. A player can fail
-// either, both, or neither: expert agreement doesn't imply model agreement,
-// or vice versa (see confidence.test.ts). See metrics/confidence.ts.
-const ecrRows = (await q(`
-  SELECT player_id AS "playerId", rank_std AS "rankStd" FROM ecr_current WHERE ecr_format = 'PPR'
-`)) as { playerId: string; rankStd: number | null }[];
-const stdByPlayer = new Map(ecrRows.map((r) => [r.playerId, r.rankStd]));
-const expertConf = expertConfidence(
-  graded.map((g) => ({ playerId: g.playerId, pos: g.pos, adp: g.adp, rankStd: stdByPlayer.get(g.playerId) ?? null })),
-  cfg.teams,
-);
-// Found via Tyjae Spears, who topped the board after the rank-vs-points fix
-// (vorp.ts) largely because ESPN and Sleeper's raw projections were 34 points
-// apart for him — a disagreement expertConf can't see, since it only looks
-// at FantasyPros' rank consensus, not the underlying point projections.
-const projConf = projectionConfidence(
-  graded.map((g) => ({
-    playerId: g.playerId, pos: g.pos, adp: g.adp,
-    spread: spreadByPlayer.get(g.playerId)?.spread ?? 0,
-    sources: spreadByPlayer.get(g.playerId)?.sources ?? 1,
-  })),
-  cfg.teams,
-);
-const confidenceLabel = (id: string): string => {
-  const e = expertConf.get(id) === 'LOW';
-  const p = projConf.get(id) === 'LOW';
-  if (e && p) return 'LOW (experts+models)';
-  if (e) return 'LOW (experts)';
-  if (p) return 'LOW (models)';
-  return 'OK';
-};
-
-const results = graded
+const results = values
   .filter((v) => !posFilter || v.pos === posFilter)
   // Filter on the INTEGER round, not the fractional position: "rounds 9-16"
   // means every pick in those rounds. Comparing the fractional roundOf against
@@ -140,6 +123,11 @@ const results = graded
   .slice(0, 15);
 
 console.log(`\n${posFilter ?? 'ALL'} · rounds ${roundMin}-${roundMax} · sorted by value score:\n`);
+console.log(
+  `espn_pts/sleeper_pts: each source's own ${cfg.scoring} projection — compare ` +
+    "them yourself; edge_pts is how far the blend of the two beats (+) or " +
+    'misses (-) what a typical player at his ADP slot produces.\n',
+);
 if (droppedForThinData > 0) {
   console.log(
     `(${droppedForThinData} players excluded league-wide: fewer than 2 real ADP sources ` +
@@ -154,7 +142,8 @@ console.table(
     round: Number(roundOf(r.adp, cfg.teams).toFixed(1)),
     drafted_as: `${r.pos}${r.adpRank}`,
     produces_like: `${r.pos}${r.vorpRank}`,
-    grade: r.grade,
-    confidence: confidenceLabel(r.playerId),
+    espn_pts: rawPtsByPlayer.get(r.playerId)?.ESPN?.toFixed(0) ?? '—',
+    sleeper_pts: rawPtsByPlayer.get(r.playerId)?.SLEEPER?.toFixed(0) ?? '—',
+    edge_pts: `${r.valueScore >= 0 ? '+' : ''}${r.valueScore.toFixed(1)}`,
   })),
 );

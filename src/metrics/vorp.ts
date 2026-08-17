@@ -127,6 +127,13 @@ function letterFor(z: number): Grade {
  *
  * With fewer than 4 players at a position the spread is too small to curve
  * meaningfully; those all grade C rather than produce a noisy A/F split.
+ *
+ * Not currently called from any script — values.ts settled on showing raw
+ * points (espn_pts/sleeper_pts/edge_pts) instead of a letter grade, per
+ * direct user feedback that a curved grade obscured more than it clarified.
+ * Kept as a standalone, independently-tested capability (see
+ * replacement.test.ts) rather than deleted, since the curving logic itself
+ * is sound and may be worth surfacing again in a different view.
  */
 export function gradeValueScores(results: readonly ValueResult[]): GradedResult[] {
   const byPos = new Map<string, ValueResult[]>();

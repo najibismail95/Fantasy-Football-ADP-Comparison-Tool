@@ -71,7 +71,7 @@ describe('detectCensoring', () => {
 });
 
 describe('num', () => {
-  test('coerces FantasyPros string numerics', () => {
+  test('coerces string numerics (Yahoo ships "1.5", not 1.5)', () => {
     assert.equal(num('2.07'), 2.07);
     assert.equal(num(5), 5);
   });

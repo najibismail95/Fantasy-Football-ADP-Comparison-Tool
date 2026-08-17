@@ -10,28 +10,21 @@ export type CanonPlayer = {
   active: boolean;
 };
 
-/** One ADP observation from one source, in that source's own format. */
+/**
+ * One ADP observation from one source, in that source's own format.
+ *
+ * FANTASYPROS is no longer ingested — its ADP came via the beatadp scrape,
+ * which was removed in favour of real APIs. The value stays in the union
+ * because adp_snapshots is an append-only time series: 2026-07-27..2026-08-16
+ * still holds FANTASYPROS rows, and narrowing this would make reading that
+ * history a type error.
+ */
 export type AdpRow = {
   playerId: string | null;   // null => unresolved
-  source: 'ESPN' | 'SLEEPER' | 'FANTASYPROS';
-  adpFormat: string;         // e.g. 'PPR_1QB'
+  source: 'ESPN' | 'SLEEPER' | 'YAHOO' | 'FANTASYPROS';
+  adpFormat: string;         // e.g. 'PPR_1QB', 'YAHOO_DEFAULT'
   adp: number;
   auctionValue: number | null;
-  sourceId: string;
-  sourceName: string;
-  resolveTier: string;
-};
-
-/** One expert-consensus-ranking observation. ECR is NOT ADP — see PLAN.md §0.5. */
-export type EcrRow = {
-  playerId: string | null;
-  source: 'FANTASYPROS';
-  ecrFormat: string;         // PPR | HALF | STD | SUPERFLEX
-  rankEcr: number;
-  rankAve: number | null;
-  rankStd: number | null;    // dispersion across experts
-  rankMin: number | null;
-  rankMax: number | null;
   sourceId: string;
   sourceName: string;
   resolveTier: string;

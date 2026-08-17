@@ -25,14 +25,24 @@ export const SOURCES = {
       `/segments/0/leaguedefaults/3?view=kona_player_info`,
     limit: 350,
   },
-  // Only source of Sleeper ADP. PPR/1QB only — query params are ignored.
-  beatadp: { url: 'https://www.beatadp.com/platform-adp' },
-  // ECR (not ADP) + rank_std dispersion. Scoring is selected by URL, not param.
-  fantasypros: {
-    ppr: 'https://www.fantasypros.com/nfl/rankings/ppr-cheatsheets.php',
-    half: 'https://www.fantasypros.com/nfl/rankings/half-point-ppr-cheatsheets.php',
-    std: 'https://www.fantasypros.com/nfl/rankings/consensus-cheatsheets.php',
-    superflex: 'https://www.fantasypros.com/nfl/rankings/superflex-cheatsheets.php',
+  /**
+   * Yahoo ADP — a real platform, via the public read-only host their own
+   * frontend calls. No OAuth: the 3-legged flow is only needed for PRIVATE
+   * league data, not the game-wide draft analysis.
+   *
+   * `draft_analysis` carries average_pick (real decimal ADP), average_cost
+   * (auction), and percent_drafted. sort=AR walks the board top-down, so
+   * paging from start=0 gets the drafted players first.
+   */
+  yahoo: {
+    players: (start: number, count: number) =>
+      'https://pub-api-ro.fantasysports.yahoo.com/fantasy/v2/game/nfl/players' +
+      `;position=ALL;count=${count};start=${start};sort=AR/draft_analysis?format=json_f`,
+    pageSize: 100,
+    // Measured 2026-08-16: 223 players carry a real average_pick and coverage
+    // is exhausted by ~start=300 (5 of 100 on that page). 4 pages walks past
+    // the end deliberately rather than stopping exactly at today's depth.
+    maxPages: 4,
   },
   // Canonical player spine. Position-filtered = 1/3 the bytes of the full dump.
   sleeper: {
