@@ -31,6 +31,14 @@ CREATE TABLE IF NOT EXISTS adp_snapshots (
 );
 
 -- ECR is NOT ADP. Kept separate on purpose (PLAN.md §0.5).
+--
+-- FROZEN ARCHIVE. FantasyPros ECR came from a page scrape, removed along with
+-- beatadp in favour of real APIs; no key-free source publishes expert consensus
+-- ranks. Nothing writes this any more and it is neither hydrated nor exported,
+-- so ecr_snapshots.parquet keeps 2026-07-27..2026-08-16 untouched. The table
+-- stays defined so that history is still queryable by hand — but ecr_current
+-- will be EMPTY on a fresh database, and joining it against live ADP would
+-- compare today's prices to a frozen August snapshot.
 CREATE TABLE IF NOT EXISTS ecr_snapshots (
   player_id     VARCHAR,
   source        VARCHAR,
@@ -113,6 +121,16 @@ CREATE OR REPLACE VIEW player_xref_current AS
   SELECT * FROM player_xref
   WHERE captured_at = (SELECT max(captured_at) FROM player_xref);
 
+-- Anchored on adp_snapshots' latest date, NOT unresolved's own — unlike every
+-- other *_current view, zero unresolved rows for a date is a normal, GOOD
+-- outcome (everything resolved), and replaceDay leaves no row at all for a
+-- day with nothing to write. Self-referencing MAX(captured_at) on a table
+-- that can legitimately be empty for the latest day skips straight past it to
+-- the last day that DID have unresolved rows — which, once a source stops
+-- being ingested (FantasyPros), means "current" freezes on THAT source's old
+-- entries forever, even after weeks of clean 100%-resolution days. Found
+-- exactly that way: 2026-08-16 resolved cleanly, but unresolved_current still
+-- showed FANTASYPROS rows from 2026-08-15, the last day the old scraper ran.
 CREATE OR REPLACE VIEW unresolved_current AS
   SELECT * FROM unresolved
-  WHERE captured_at = (SELECT max(captured_at) FROM unresolved);
+  WHERE captured_at = (SELECT max(captured_at) FROM adp_snapshots);

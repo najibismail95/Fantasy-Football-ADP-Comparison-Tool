@@ -78,7 +78,7 @@ export function detectCensoring(
   return censorAt;
 }
 
-/** FantasyPros returns numbers as JSON strings ("2.07"). Coerce explicitly. */
+/** Yahoo returns numbers as JSON strings ("1.5"). Coerce explicitly. */
 export function num(v: unknown): number | null {
   if (v === null || v === undefined || v === '') return null;
   const n = typeof v === 'number' ? v : Number(String(v));

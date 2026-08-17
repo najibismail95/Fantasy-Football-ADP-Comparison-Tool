@@ -3,12 +3,13 @@ import { today } from '../lib/bronze.js';
 import { Crosswalk } from '../resolve/crosswalk.js';
 import { fetchState, ingestSleeperSpine } from '../ingest/sleeper.js';
 import { fetchEspn, parseEspn } from '../ingest/espn.js';
-import { fetchBeatAdp, parseBeatAdp, type BeatAdpResult } from '../ingest/beatadp.js';
-import { fetchFantasyPros, parseFantasyPros, type FantasyProsFormat } from '../ingest/fantasypros.js';
+import { fetchYahoo, parseYahoo } from '../ingest/yahoo.js';
 import {
   fetchSleeperProjections, parseSleeperProjections, parseSleeperAdp,
 } from '../ingest/sleeper-projections.js';
-import { exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay } from '../db/client.js';
+import {
+  assertExportSafe, exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay,
+} from '../db/client.js';
 import type { UnresolvedRow } from '../types.js';
 
 /**
@@ -20,9 +21,15 @@ import type { UnresolvedRow } from '../types.js';
  * there is no way to see when matching quality started to slip — and August
  * rookie churn is exactly when it does. They must be hydrated as well as
  * exported, or CI would write a single day over the whole series.
+ *
+ * ecr_snapshots is deliberately ABSENT. FantasyPros ECR came from a page
+ * scrape that was removed with beatadp; nothing writes ECR any more. The table
+ * and its committed Parquet are kept as a frozen archive of 2026-07-27..08-16
+ * rather than deleted — that history is real and cannot be re-collected — but
+ * it is neither hydrated nor exported, so the file is never rewritten.
  */
 const TIME_SERIES_TABLES = [
-  'adp_snapshots', 'ecr_snapshots', 'rank_snapshots', 'projections',
+  'adp_snapshots', 'rank_snapshots', 'projections',
   'player_xref', 'unresolved',
 ] as const;
 
@@ -35,7 +42,6 @@ const TIME_SERIES_TABLES = [
 const EXPORTED_TABLES = ['players', ...TIME_SERIES_TABLES] as const;
 
 const DRY = process.argv.includes('--dry-run');
-const FP_FORMATS: FantasyProsFormat[] = ['ppr', 'superflex'];
 
 /** Fail the run if a top-N player can't be resolved — catches August rookie churn. */
 const COVERAGE_GATE_TOP_N = 200;
@@ -59,27 +65,10 @@ async function main() {
   const espn = parseEspn(espnRaw, xwalk, state.season);
   console.log(`espn team map: ${xwalk.espnTeamCount} teams derived`);
 
-  // STOPGAP (2026-08-16): beatadp redeployed and the RSC payload no longer
-  // matches ROW_RE, so the parse throws and takes the whole run with it. That
-  // cost 2026-08-16 outright — including the ESPN and Sleeper ADP that parsed
-  // fine — and daily ADP cannot be backfilled. Degrade this one source to a
-  // warning until it is replaced by a real API (Yahoo's pub-api-ro carries
-  // average_pick and average_cost without OAuth).
-  //
-  // Deliberately NOT generalised to every source: a source vanishing silently
-  // is normally a stop-the-run event, and the FANTASYPROS ADP this supplies is
-  // what keeps deep rounds gradeable (buildConsensusAdp needs 2 sources after
-  // censoring, and ESPN censors past its ceiling). Days captured while this is
-  // warning will have thin coverage past ~round 15. Remove with beatadp itself.
-  let beat: BeatAdpResult = { adp: [], unresolved: [], rowsSeen: 0 };
-  try {
-    beat = parseBeatAdp(await fetchBeatAdp(captureDate), xwalk);
-  } catch (err) {
-    console.error(
-      `\n!!  beatadp SKIPPED (FantasyPros ADP missing for this capture): ` +
-        `${err instanceof Error ? err.message : String(err)}\n`,
-    );
-  }
+  // Third platform. Replaces the beatadp scrape that supplied FantasyPros ADP:
+  // a real API, and the only source here that also carries auction values.
+  const yahoo = parseYahoo(await fetchYahoo(captureDate), xwalk);
+  console.log(`yahoo: ${yahoo.adp.length} adp from ${yahoo.rowsSeen} rows`);
 
   // Second projection source. Keyed by Sleeper player_id, so it joins to the
   // spine directly with no crosswalk. ESPN alone compresses the middle of each
@@ -92,25 +81,13 @@ async function main() {
   console.log(`sleeper projections: ${sleeperProj.seen} players (PPR), ${sleeperProj.projections.length} rows across scorings`);
   console.log(`sleeper adp: ${sleeperAdp.seen} players (${sleeperAdp.sentinelsDropped} undrafted sentinels dropped)`);
 
-  const fpResults = [];
-  for (const fmt of FP_FORMATS) {
-    const r = parseFantasyPros(await fetchFantasyPros(fmt, captureDate), fmt, xwalk);
-    fpResults.push(r);
-    console.log(`fantasypros/${fmt}: ${r.ecr.length} rows, scoring=${r.scoring}, experts=${r.totalExperts ?? '?'}`);
-  }
-
   // 3. Report resolution quality per source.
-  const unresolved: UnresolvedRow[] = [
-    ...espn.unresolved, ...beat.unresolved, ...fpResults.flatMap((r) => r.unresolved),
-  ];
+  const unresolved: UnresolvedRow[] = [...espn.unresolved, ...yahoo.unresolved];
   const rate = (ok: number, total: number) => (total ? ((100 * ok) / total).toFixed(1) : '—');
   console.log('\nresolution:');
-  console.log(`  espn          ${espn.adp.length} adp / ${espn.ranks.length} ranks / ${espn.projections.length} proj  (${espn.unresolved.length} unresolved)`);
-  console.log(`  beatadp/fpros ${beat.adp.length} adp from ${beat.rowsSeen} rows  → ${rate(beat.rowsSeen - beat.unresolved.length, beat.rowsSeen)}%  (${beat.unresolved.length} unresolved)`);
-  for (const [i, r] of fpResults.entries()) {
-    const total = r.ecr.length + r.unresolved.length;
-    console.log(`  fantasypros/${FP_FORMATS[i]}  ${r.ecr.length} ecr  → ${rate(r.ecr.length, total)}%  (${r.unresolved.length} unresolved)`);
-  }
+  console.log(`  espn    ${espn.adp.length} adp / ${espn.ranks.length} ranks / ${espn.projections.length} proj  (${espn.unresolved.length} unresolved)`);
+  console.log(`  yahoo   ${yahoo.adp.length} adp from ${yahoo.rowsSeen} rows  → ${rate(yahoo.rowsSeen - yahoo.unresolved.length, yahoo.rowsSeen)}%  (${yahoo.unresolved.length} unresolved)`);
+  console.log(`  sleeper ${sleeperAdp.adp.length} adp (id-keyed, no resolution needed)`);
   if (unresolved.length) {
     console.log(`\n  unresolved (${unresolved.length}): ` +
       unresolved.slice(0, 10).map((u) => `${u.sourceName}[${u.pos ?? '?'}]`).join(', ') +
@@ -118,7 +95,7 @@ async function main() {
   }
 
   // 4. Coverage gate on the players that actually matter.
-  const topAdp = [...beat.adp, ...espn.adp, ...sleeperAdp.adp].sort((a, b) => a.adp - b.adp).slice(0, COVERAGE_GATE_TOP_N);
+  const topAdp = [...yahoo.adp, ...espn.adp, ...sleeperAdp.adp].sort((a, b) => a.adp - b.adp).slice(0, COVERAGE_GATE_TOP_N);
   const gateFails = topAdp.filter((r) => !r.playerId).length;
   if (gateFails > 0) {
     throw new Error(`coverage gate: ${gateFails} of the top ${COVERAGE_GATE_TOP_N} players by ADP are unresolved`);
@@ -153,19 +130,12 @@ async function main() {
       espn_id: p.espnId, search_rank: p.searchRank, active: p.active, captured_at: d,
     })));
 
-  const allAdp = [...espn.adp, ...beat.adp, ...sleeperAdp.adp];
+  const allAdp = [...espn.adp, ...yahoo.adp, ...sleeperAdp.adp];
   counts.adp_snapshots = await replaceDay(conn, 'adp_snapshots',
     ['player_id', 'source', 'adp_format', 'adp', 'auction_value', 'captured_at'],
     allAdp.map((r) => ({
       player_id: r.playerId, source: r.source, adp_format: r.adpFormat,
       adp: r.adp, auction_value: r.auctionValue, captured_at: d,
-    })), d);
-
-  counts.ecr_snapshots = await replaceDay(conn, 'ecr_snapshots',
-    ['player_id', 'source', 'ecr_format', 'rank_ecr', 'rank_ave', 'rank_std', 'rank_min', 'rank_max', 'captured_at'],
-    fpResults.flatMap((f) => f.ecr).map((r) => ({
-      player_id: r.playerId, source: r.source, ecr_format: r.ecrFormat, rank_ecr: r.rankEcr,
-      rank_ave: r.rankAve, rank_std: r.rankStd, rank_min: r.rankMin, rank_max: r.rankMax, captured_at: d,
     })), d);
 
   counts.rank_snapshots = await replaceDay(conn, 'rank_snapshots',
@@ -184,7 +154,7 @@ async function main() {
 
   counts.player_xref = await replaceDay(conn, 'player_xref',
     ['player_id', 'source', 'source_id', 'source_name', 'resolve_tier', 'captured_at'],
-    [...allAdp, ...espn.ranks, ...fpResults.flatMap((f) => f.ecr)].map((r) => ({
+    [...allAdp, ...espn.ranks].map((r) => ({
       player_id: r.playerId, source: r.source, source_id: r.sourceId,
       source_name: r.sourceName, resolve_tier: r.resolveTier, captured_at: d,
     })), d);
@@ -202,8 +172,21 @@ async function main() {
   // Guarded: the export overwrites the committed history wholesale, so it must
   // refuse to drop a capture date. `players` is exempt — it is current-state by
   // design (see replaceAll), so its single captured_at moves forward every run.
+  //
+  // knownDates is the set of dates this database actually holds, taken from
+  // adp_snapshots as the anchor. Without it, a table that is legitimately EMPTY
+  // for a date reads as that date having been deleted — `unresolved` is empty
+  // whenever every player resolves, which is the goal, not a fault.
+  const knownDates = (
+    (await conn.runAndReadAll('SELECT DISTINCT captured_at AS d FROM adp_snapshots'))
+      .getRowObjectsJson() as { d: string }[]
+  ).map((r) => r.d);
+
+  // Check them ALL before writing ANY — a refusal must leave the committed
+  // Parquet untouched, not half-rewritten.
+  await assertExportSafe(conn, TIME_SERIES_TABLES, SILVER, { knownDates });
   for (const t of EXPORTED_TABLES) {
-    await exportParquet(conn, t, SILVER, { guardHistory: t !== 'players' });
+    await exportParquet(conn, t, SILVER, { guardHistory: t !== 'players', knownDates });
   }
 
   const days = await conn.runAndReadAll(

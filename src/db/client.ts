@@ -99,13 +99,22 @@ export async function replaceAll(
  *
  * Deliberately NOT checked: row counts within a day. Those legitimately move
  * (Sleeper's coverage went 311 -> 804 mid-season, and a source outage can push
- * the other way), so guarding them would fire on healthy data. A day that
- * empties out entirely still trips this check — it drops out of the day set.
+ * the other way), so guarding them would fire on healthy data.
+ *
+ * ⚠️ `knownDates` distinguishes "this date vanished" from "this date is
+ * legitimately empty", which look identical when you only inspect one table. A
+ * zero-row day is not automatically suspicious: `unresolved` is EMPTY on a run
+ * where every player matched, which is the target state, not a failure. This
+ * fired on exactly that — the Yahoo switch took resolution to 100%, so
+ * unresolved had no rows for the day, and the guard read that as the day being
+ * deleted. Pass the dates the run actually knows about (from the anchor table)
+ * and a date is only flagged when the database has no record of it anywhere.
  */
 export async function assertNoHistoryLoss(
   conn: DuckDBConnection,
   table: string,
   dir: string,
+  { knownDates = [] as readonly string[] } = {},
 ): Promise<void> {
   const file = path.join(dir, `${table}.parquet`);
   try {
@@ -120,7 +129,10 @@ export async function assertNoHistoryLoss(
       WHERE NOT EXISTS (SELECT 1 FROM ${table} t WHERE t.captured_at = p.captured_at)
       ORDER BY 1`,
   );
-  const days = (missing.getRowObjectsJson() as { d: string }[]).map((r) => r.d);
+  const known = new Set(knownDates);
+  const days = (missing.getRowObjectsJson() as { d: string }[])
+    .map((r) => r.d)
+    .filter((d) => !known.has(d));
   if (days.length === 0) return;
 
   const shown = days.slice(0, 8).join(', ') + (days.length > 8 ? `, +${days.length - 8} more` : '');
@@ -144,13 +156,34 @@ export async function exportParquet(
   conn: DuckDBConnection,
   table: string,
   dir: string,
-  { guardHistory = true } = {},
+  { guardHistory = true, knownDates = [] as readonly string[] } = {},
 ) {
-  if (guardHistory) await assertNoHistoryLoss(conn, table, dir);
+  if (guardHistory) await assertNoHistoryLoss(conn, table, dir, { knownDates });
   await fs.mkdir(dir, { recursive: true });
   await conn.run(
     `COPY (SELECT * FROM ${table}) TO '${path.join(dir, `${table}.parquet`)}' (FORMAT PARQUET)`,
   );
+}
+
+/**
+ * Check every table BEFORE writing any of them.
+ *
+ * exportParquet guards itself, but the export is a loop: a guard firing on the
+ * last table leaves the earlier ones already overwritten. That happened —
+ * `unresolved` tripped after five files had been rewritten, leaving the set
+ * half-updated. Checking up front makes a refusal leave the committed Parquet
+ * exactly as it was, which is the whole point of refusing.
+ *
+ * The per-export guard stays as a backstop for anything calling exportParquet
+ * directly.
+ */
+export async function assertExportSafe(
+  conn: DuckDBConnection,
+  tables: readonly string[],
+  dir: string,
+  { knownDates = [] as readonly string[] } = {},
+): Promise<void> {
+  for (const t of tables) await assertNoHistoryLoss(conn, t, dir, { knownDates });
 }
 
 /**
