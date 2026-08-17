@@ -1,5 +1,6 @@
 import { openDb } from '../db/client.js';
 import { detectCensoring } from '../lib/assert.js';
+import { heading, note, table, MARKDOWN } from '../lib/render.js';
 
 /** Sanity + first-look queries over the ingested data. `npm run report` */
 const conn = await openDb();
@@ -21,11 +22,12 @@ for (const r of rawAdpBySource) {
   arr.push(Number(r.adp));
 }
 const censorClauses: string[] = [];
+const censorNotes: string[] = [];
 for (const [source, adps] of adpsBySource) {
   const ceiling = detectCensoring(adps);
   if (ceiling !== null) {
     censorClauses.push(`(source = '${source}' AND adp > ${ceiling})`);
-    console.log(`[censoring] ${source} ceiling detected at pick ${ceiling.toFixed(0)} — excluded from arbitrage`);
+    censorNotes.push(`${source} ADP is censored above pick ${ceiling.toFixed(0)} — those values mean "very late", not a real average, so they are excluded from arbitrage.`);
   }
 }
 const CENSOR_FILTER = censorClauses.length ? `NOT (${censorClauses.join(' OR ')})` : 'TRUE';
@@ -38,9 +40,16 @@ const CENSOR_FILTER = censorClauses.length ? `NOT (${censorClauses.join(' OR ')}
  */
 const asOf = (await q(`SELECT max(captured_at) AS d FROM adp_snapshots`)) as { d: string }[];
 const days = (await q(`SELECT count(DISTINCT captured_at) AS n FROM adp_snapshots`)) as { n: string }[];
-console.log(`\nreporting on snapshot ${asOf[0]?.d} (${days[0]?.n} day(s) of history collected)`);
+if (MARKDOWN) {
+  console.log(`# Fantasy ADP report — ${asOf[0]?.d}`);
+  console.log(`\n_Snapshot ${asOf[0]?.d} · ${days[0]?.n} days of history collected. ` +
+    `Generated automatically by the daily ingest workflow._`);
+} else {
+  console.log(`\nreporting on snapshot ${asOf[0]?.d} (${days[0]?.n} day(s) of history collected)`);
+}
+for (const n of censorNotes) note(n);
 
-console.log('\n=== integrity: ADP must be decimal, not rank (PLAN.md §0.3) ===');
+heading('Integrity: ADP must be decimal, not rank (PLAN.md §0.3)');
 // ADP values are draft POSITIONS, so min() is the most expensive player and
 // max() is how deep the source publishes — named explicitly, since "lo"/"hi"
 // read as low/high value and mean the opposite here.
@@ -52,7 +61,7 @@ console.log('\n=== integrity: ADP must be decimal, not rank (PLAN.md §0.3) ==='
 // ignore the table. Deep small-sample players legitimately have integer ADP
 // (drafted once at pick 440 -> 440.0); the top of the board is where a
 // swapped-in rank column would actually show. See lib/assert.ts.
-console.table(
+table(
   await q(`
   WITH ranked AS (
     SELECT source, adp, row_number() OVER (PARTITION BY source ORDER BY adp) AS rn
@@ -65,14 +74,14 @@ console.table(
   FROM ranked GROUP BY source ORDER BY source`),
 );
 
-console.log('=== resolution tier distribution (fuzzy should stay ~0) ===');
-console.table(
+heading('Resolution tier distribution (fuzzy should stay ~0)');
+table(
   await q(`
   SELECT source, resolve_tier, count(*) AS n
   FROM player_xref_current GROUP BY 1,2 ORDER BY source, n DESC`),
 );
 
-console.log('=== A. cross-platform arbitrage: LEAVE-ONE-OUT MEDIAN (PPR/1QB) ===');
+heading('A. Cross-platform arbitrage: leave-one-out median (PPR/1QB)');
 // Each source is compared against the MEDIAN OF THE OTHER SOURCES, not against
 // one other platform pairwise.
 //
@@ -98,7 +107,7 @@ console.log('=== A. cross-platform arbitrage: LEAVE-ONE-OUT MEDIAN (PPR/1QB) ===
 //
 // Direction: ADP is a draft POSITION, so a HIGHER number means he lasts longer
 // = CHEAPER. Stated in words rather than left to a sign.
-console.table(
+table(
   await q(`
   WITH clean AS (
     -- Ceiling(s) detected above from THIS run's data, not hardcoded — a source
@@ -173,8 +182,8 @@ console.table(
  * is mispriced".
  */
 
-console.log('=== B. superflex: ESPN rank shift for QBs (FORMATS.md §1) ===');
-console.table(
+heading('B. Superflex: ESPN rank shift for QBs (FORMATS.md §1)');
+table(
   await q(`
   WITH r AS (
     SELECT player_id,
@@ -187,5 +196,5 @@ console.table(
   ORDER BY r.sflex LIMIT 6`),
 );
 
-console.log('=== unresolved_current (surfaced, never dropped) ===');
-console.table(await q(`SELECT source, source_name, position FROM unresolved_current`));
+heading('Unresolved players (surfaced, never dropped)');
+table(await q(`SELECT source, source_name, position FROM unresolved_current`));

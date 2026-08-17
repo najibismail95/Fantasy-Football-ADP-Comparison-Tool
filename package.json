@@ -11,9 +11,10 @@
     "ingest:dry": "tsx src/scripts/daily-ingest.ts --dry-run",
     "typecheck": "tsc --noEmit",
     "report": "tsx src/scripts/report.ts",
-    "test": "tsx --test src/**/*.test.ts",
+    "test": "tsx --test 'src/**/*.test.ts'",
     "values": "tsx src/scripts/values.ts",
-    "tiers": "tsx src/scripts/tiers.ts"
+    "tiers": "tsx src/scripts/tiers.ts",
+    "report:md": "tsx src/scripts/report.ts --markdown"
   },
   "dependencies": {
     "@duckdb/node-api": "1.5.5-r.2",
