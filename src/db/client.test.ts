@@ -4,7 +4,8 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import { GOLD } from '../config.js';
 import {
-  assertNoHistoryLoss, exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay,
+  assertExportSafe, assertNoHistoryLoss, exportParquet, hydrateFromParquet, openDb,
+  replaceAll, replaceDay,
 } from './client.js';
 import type { DuckDBConnection } from '@duckdb/node-api';
 
@@ -189,6 +190,46 @@ describe('export history guard', () => {
     );
     assert.equal(Number((check.getRowObjectsJson() as { n: string }[])[0]!.n), 4,
       'the parquet must still hold all 4 days after two refused exports');
+  });
+
+  test('a legitimately EMPTY day is not treated as a deleted day', async () => {
+    // Regression, found running the Yahoo ingest: resolution hit 100%, so
+    // `unresolved` had zero rows for the date. Zero rows there is the GOAL, but
+    // the guard saw the date missing from the table and refused to export,
+    // after five other files had already been written.
+    //
+    // knownDates carries the dates the run actually holds (from the anchor
+    // table), so "empty for this table" stops looking like "gone entirely".
+    // Earlier tests here left days deleted; start from a table matching the file.
+    for (const d of ['2026-08-01', '2026-08-02', '2026-08-03', '2026-08-04']) {
+      await replaceDay(c2, 'adp_snapshots', ADP_COLS, adpRows(d, 5), d);
+    }
+    await assert.doesNotReject(() => assertNoHistoryLoss(c2, 'adp_snapshots', DIR2),
+      'precondition: table and file agree');
+
+    await c2.run("DELETE FROM adp_snapshots WHERE captured_at = DATE '2026-08-04'");
+    await assert.rejects(
+      () => assertNoHistoryLoss(c2, 'adp_snapshots', DIR2),
+      /refusing to export.*2026-08-04/s,
+      'precondition: without knownDates an empty date reads as lost',
+    );
+    await assert.doesNotReject(
+      () => assertNoHistoryLoss(c2, 'adp_snapshots', DIR2, { knownDates: ['2026-08-04'] }),
+      'a date the run knows about is legitimately empty, not deleted',
+    );
+    await replaceDay(c2, 'adp_snapshots', ADP_COLS, adpRows('2026-08-04', 5), '2026-08-04');
+  });
+
+  test('assertExportSafe checks every table before any is written', async () => {
+    // The atomicity half of the same bug: exportParquet guards itself, but in a
+    // loop a late refusal leaves earlier files already overwritten.
+    await c2.run("DELETE FROM adp_snapshots WHERE captured_at = DATE '2026-08-01'");
+    await assert.rejects(
+      () => assertExportSafe(c2, ['adp_snapshots'], DIR2),
+      /refusing to export.*2026-08-01/s,
+    );
+    await replaceDay(c2, 'adp_snapshots', ADP_COLS, adpRows('2026-08-01', 5), '2026-08-01');
+    await assert.doesNotReject(() => assertExportSafe(c2, ['adp_snapshots'], DIR2));
   });
 
   test('dimension tables can opt out — their single day moves forward by design', async () => {

@@ -8,7 +8,9 @@ import { fetchFantasyPros, parseFantasyPros, type FantasyProsFormat } from '../i
 import {
   fetchSleeperProjections, parseSleeperProjections, parseSleeperAdp,
 } from '../ingest/sleeper-projections.js';
-import { exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay } from '../db/client.js';
+import {
+  assertExportSafe, exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay,
+} from '../db/client.js';
 import type { UnresolvedRow } from '../types.js';
 
 /**
@@ -202,8 +204,21 @@ async function main() {
   // Guarded: the export overwrites the committed history wholesale, so it must
   // refuse to drop a capture date. `players` is exempt — it is current-state by
   // design (see replaceAll), so its single captured_at moves forward every run.
+  //
+  // knownDates is the set of dates this database actually holds, taken from
+  // adp_snapshots as the anchor. Without it, a table that is legitimately EMPTY
+  // for a date reads as that date having been deleted — `unresolved` is empty
+  // whenever every player resolves, which is the goal, not a fault.
+  const knownDates = (
+    (await conn.runAndReadAll('SELECT DISTINCT captured_at AS d FROM adp_snapshots'))
+      .getRowObjectsJson() as { d: string }[]
+  ).map((r) => r.d);
+
+  // Check them ALL before writing ANY — a refusal must leave the committed
+  // Parquet untouched, not half-rewritten.
+  await assertExportSafe(conn, TIME_SERIES_TABLES, SILVER, { knownDates });
   for (const t of EXPORTED_TABLES) {
-    await exportParquet(conn, t, SILVER, { guardHistory: t !== 'players' });
+    await exportParquet(conn, t, SILVER, { guardHistory: t !== 'players', knownDates });
   }
 
   const days = await conn.runAndReadAll(
