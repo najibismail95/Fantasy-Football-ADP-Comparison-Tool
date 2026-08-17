@@ -66,7 +66,11 @@ jobs:
       - name: Build report
         continue-on-error: true
         run: |
-          npm run report:md > "$RUNNER_TEMP/report.md"
+          # -s (silent) matters here: without it npm prints its own banner
+          # ("> fantasy-adp@0.1.0 report:md ...") into the captured output, and
+          # since those lines start with ">" they render as a blockquote above
+          # the report's title on GitHub.
+          npm run -s report:md > "$RUNNER_TEMP/report.md"
           mv "$RUNNER_TEMP/report.md" REPORT.md
           cat REPORT.md >> "$GITHUB_STEP_SUMMARY"
 
