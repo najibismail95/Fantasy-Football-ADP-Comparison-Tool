@@ -173,7 +173,7 @@ console.table(
  * is mispriced".
  */
 
-console.log('=== C. superflex: ESPN rank shift for QBs (FORMATS.md §1) ===');
+console.log('=== B. superflex: ESPN rank shift for QBs (FORMATS.md §1) ===');
 console.table(
   await q(`
   WITH r AS (
