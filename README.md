@@ -93,12 +93,26 @@ Two workflows, both in `.github/workflows/`:
 
 **`ci.yml`** runs typecheck and the test suite on every pull request and every push to `main`.
 
-### Reading the output without cloning anything
+### Reading the report without cloning anything
 
-- **[REPORT.md](./REPORT.md)** — regenerated every run and committed, so the current picture is one click from the repo front page. Its git history doubles as a day-by-day record of how the market moved. Carries the full report *and* the value board for QB/RB/WR/TE.
-- **Actions → any run → job summary** — the same content rendered on the run itself, so past days stay readable without digging through commits.
+Two routes. Both show the same content — the integrity checks, cross-platform arbitrage, and the value board for QB/RB/WR/TE.
 
-Both come from `npm run report:md` and `npm run values:md` — the same `report` and `values` you'd run locally, with Markdown tables instead of terminal box-drawing. Identical numbers, same code path.
+**1. [REPORT.md](./REPORT.md) — today's report, no account needed**
+
+Regenerated and committed on every run, so it's one click from the repo front page and renders straight in GitHub. Its git history doubles as a day-by-day record of how the market moved: `git log -p REPORT.md` walks you back through the season.
+
+**2. GitHub Actions — any past day**
+
+Every run keeps its own copy, so you can read a specific day without digging through commits:
+
+1. Open the **Actions** tab
+2. Pick **Daily ADP ingest** from the left sidebar
+3. Click any run (they're titled `data: ADP snapshot YYYY-MM-DD`)
+4. The full report is rendered on that run's **Summary** page
+
+> **Note:** GitHub only shows run summaries and logs to signed-in users. Any GitHub account works — it doesn't need to be yours, and the repo is public — but a logged-out visitor will just see "Sign in to view logs". If you want a link to send someone without an account, use `REPORT.md` above.
+
+Both routes come from `npm run report:md` and `npm run values:md` — the same `report` and `values` you'd run locally, with Markdown tables instead of terminal box-drawing. Identical numbers, same code path.
 
 ### When it breaks
 
