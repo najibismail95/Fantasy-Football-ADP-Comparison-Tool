@@ -32,13 +32,3 @@ export const DEFAULT_CONFIG: LeagueConfig = LeagueConfigSchema.parse({
   starters: {},
 });
 
-/** Stable identity for a config, used as a cache/storage key. */
-export function configKey(cfg: LeagueConfig): string {
-  const s = cfg.starters;
-  return [
-    `t${cfg.teams}`, cfg.scoring, cfg.tePremium ? `tep${cfg.tePremium}` : null,
-    `qb${s.qb}`, `rb${s.rb}`, `wr${s.wr}`, `te${s.te}`,
-    s.flex ? `flex${s.flex}` : null, s.superflex ? `sf${s.superflex}` : null,
-    s.k ? `k${s.k}` : null, s.dst ? `dst${s.dst}` : null,
-  ].filter(Boolean).join('_');
-}
