@@ -11,13 +11,3 @@ export const roundOf = (pick: number, teams: number): number => (pick - 1) / tea
 
 /** The integer round a pick falls in. Pick 12 in a 12-team league is round 1. */
 export const roundNumber = (pick: number, teams: number): number => Math.ceil(pick / teams);
-
-/** Inclusive pick range covered by a round span, e.g. rounds 9-16 => 97..192. */
-export const pickRangeForRounds = (
-  roundMin: number,
-  roundMax: number,
-  teams: number,
-): { firstPick: number; lastPick: number } => ({
-  firstPick: (roundMin - 1) * teams + 1,
-  lastPick: roundMax * teams,
-});

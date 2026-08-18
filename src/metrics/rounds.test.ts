@@ -1,6 +1,6 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
-import { roundOf, roundNumber, pickRangeForRounds } from './rounds.js';
+import { roundOf, roundNumber } from './rounds.js';
 
 describe('roundOf', () => {
   test('pick 1 is the very start of round 1', () => {
@@ -26,28 +26,24 @@ describe('roundOf', () => {
   });
 });
 
-describe('pickRangeForRounds', () => {
-  test('rounds 9-16 in a 12-team league covers picks 97-192', () => {
-    // Regression: the buggy filter selected 96-180, dropping a full round
-    // off the end AND pulling in one pick from round 8.
-    assert.deepEqual(pickRangeForRounds(9, 16, 12), { firstPick: 97, lastPick: 192 });
-  });
+describe('round-range filtering', () => {
+  test('a round range must be filtered on the INTEGER round, not the fraction', () => {
+    // Regression, and the reason values.ts filters on roundNumber: roundOf is a
+    // continuous coordinate where integers mark the START of a round, so the
+    // last pick of round 16 reads 16.92 — inside round 16, yet greater than 16.
+    // Filtering `roundOf <= roundMax` therefore cuts at pick 181 and silently
+    // drops the remaining 11 picks of the round.
+    const firstPickOfRound9 = 97;
+    const lastPickOfRound16 = 192;
 
-  test('round 1 starts at pick 1', () => {
-    assert.deepEqual(pickRangeForRounds(1, 1, 12), { firstPick: 1, lastPick: 12 });
-  });
+    assert.equal(roundNumber(firstPickOfRound9, 12), 9);
+    assert.equal(roundNumber(lastPickOfRound16, 12), 16);
+    assert.equal(roundNumber(firstPickOfRound9 - 1, 12), 8, 'the pick before falls in the previous round');
+    assert.equal(roundNumber(lastPickOfRound16 + 1, 12), 17, 'the pick after falls in the next round');
 
-  test('the range endpoints agree with the INTEGER round, not the fraction', () => {
-    // roundOf is a continuous coordinate where integers mark the START of a
-    // round, so the last pick of round 16 reads 16.92 — inside round 16 but
-    // greater than 16. Range membership must therefore use roundNumber.
-    // Filtering on `roundOf <= roundMax` cuts at pick 181 and silently drops
-    // the remaining 11 picks of the round.
-    const { firstPick, lastPick } = pickRangeForRounds(9, 16, 12);
-    assert.equal(roundNumber(firstPick, 12), 9);
-    assert.equal(roundNumber(lastPick, 12), 16);
-    assert.equal(roundNumber(firstPick - 1, 12), 8, 'the pick before falls in the previous round');
-    assert.equal(roundNumber(lastPick + 1, 12), 17, 'the pick after falls in the next round');
-    assert.ok(roundOf(lastPick, 12) > 16, 'the fractional form exceeds 16 despite being inside round 16');
+    assert.ok(
+      roundOf(lastPickOfRound16, 12) > 16,
+      'the fractional form exceeds 16 despite the pick being inside round 16',
+    );
   });
 });

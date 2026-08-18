@@ -19,8 +19,20 @@ import { blendProjections, type SourceProjection } from '../metrics/projections.
  */
 
 const args = process.argv.slice(2);
-const includeAll = args.includes('--all');
-const weightArg = args.find((a) => a.startsWith('--weight='));
+
+/**
+ * `npm run tiers RB --all` never reaches argv: npm treats a bare `--all` as
+ * one of ITS OWN config flags and strips it, so the script saw only "RB" and
+ * silently produced the drafted-only board. Nothing errored and the output
+ * looked plausible, which is the worst version of a broken flag.
+ *
+ * npm does leave the value behind in npm_config_*, so both forms are honoured:
+ * `npm run tiers RB --all` and the strictly-correct `npm run tiers RB -- --all`.
+ */
+const includeAll = args.includes('--all') || process.env.npm_config_all === 'true';
+const weightArg =
+  args.find((a) => a.startsWith('--weight=')) ??
+  (process.env.npm_config_weight ? `--weight=${process.env.npm_config_weight}` : undefined);
 const positional = args.filter((a) => !a.startsWith('--'));
 const pos = (positional[0] ?? 'QB').toUpperCase();
 

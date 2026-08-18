@@ -3,18 +3,23 @@
  * blocking key — so every mismatch becomes a silent miss rather than a bad match.
  * This single map is what took ESPN from 92% -> 99.4%. See CROSSWALK.md.
  *
- *   defense : Sleeper DEF | ESPN 16 | FantasyPros DST | beatadp DEF
+ * Current sources:
+ *   defense : Sleeper DEF | ESPN 16 (mapped in config.ts) | Yahoo DEF
  *   fullback: Sleeper FB  | everyone else RB
+ *
+ * Some aliases below (DST, D/ST, DST1, PK, HB) no longer match anything the
+ * live sources emit — they're left in deliberately. A stale alias costs one
+ * map entry; a missing one costs a silent resolution failure, which is the
+ * failure mode this whole map exists to prevent.
  */
 const POSITION_MAP: Record<string, string> = {
   DST: 'DEF', 'D/ST': 'DEF', DEF: 'DEF', DST1: 'DEF',
   FB: 'RB', HB: 'RB', RB: 'RB',
   PK: 'K', K: 'K',
   QB: 'QB', WR: 'WR', TE: 'TE',
-  // NOTE: FantasyPros' superflex page carries position_id "OP" (offensive
-  // player) at the LIST level only — verified that player_position_id is
-  // always QB/RB/WR/TE. Deliberately NOT mapped: guessing a position for "OP"
-  // would silently mislabel every player on that list.
+  // A source that lumps everything under one label ("OP" for offensive player,
+  // as one now-removed source did) is deliberately NOT mapped: guessing a
+  // position would silently mislabel every player carrying it.
 };
 
 export const normPos = (p: string | null | undefined): string | null =>
@@ -25,7 +30,7 @@ export const normPos = (p: string | null | undefined): string | null =>
  * scores "hollywood brown" vs "marquise brown" near zero. Expect to add a few
  * each preseason; keep this in version control.
  */
-export const ALIASES: Record<string, string> = {
+const ALIASES: Record<string, string> = {
   'hollywood brown': 'marquise brown',
   'kenneth gainwell': 'kenny gainwell',
   'cameron ward': 'cam ward',

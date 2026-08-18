@@ -6,9 +6,12 @@ import { normName, normPos } from '../resolve/normalize.js';
 import type { CanonPlayer } from '../types.js';
 
 /**
- * Sleeper is the canonical player spine. It has NO ADP (verified: 238 GraphQL
- * query fields, none expose it; absent from the official docs too) — Sleeper
- * ADP comes from beatadp. This module supplies identity, not prices.
+ * Sleeper is the canonical player spine: this module supplies identity, not
+ * prices. Sleeper's ADP and projections both come from its projections
+ * endpoint instead — see ingest/sleeper-projections.ts.
+ *
+ * (The players endpoint genuinely has no ADP — verified across 238 GraphQL
+ * query fields, and absent from the docs — which is why it lives elsewhere.)
  *
  * Position-filtered fetches are 1/3 the bytes of the 14.6MB full dump with
  * full field parity (53 fields either way). Docs ask for once-per-day at most.

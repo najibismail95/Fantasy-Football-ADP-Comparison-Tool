@@ -1,8 +1,9 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-export const DATA = path.join(ROOT, 'data');
+// Internal: only used to derive the three exported layer paths below.
+const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const DATA = path.join(ROOT, 'data');
 export const BRONZE = path.join(DATA, 'bronze');
 export const SILVER = path.join(DATA, 'silver');
 export const GOLD = path.join(DATA, 'gold');
