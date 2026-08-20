@@ -10,6 +10,7 @@ npm run ingest      # fetch all sources -> DuckDB + Parquet  (~5-10s)
 npm run report      # sanity checks + cross-platform arbitrage
 npm run values RB 6 10   # value board: position + round range
 npm run tiers TE          # ADP-clustered tiers with cliffs
+npm run sos RB            # strength of schedule: regular season vs playoffs
 ```
 
 `npm run ingest:dry` fetches and resolves without writing to the database — good for checking a source hasn't broken before it touches anything.
@@ -56,6 +57,27 @@ Tier 2  (adp 41-47, 205–211 pts, 2 players)
 
 Tier count scales to the draftable pool automatically — it's not a settable knob, because forcing a small tier count silently produces tiers that span 100+ points and stop meaning anything.
 
+**`npm run sos [POS]`** — the 24 most-drafted players at a position, with how hard their schedule is in the fantasy regular season versus the fantasy playoffs:
+
+```
+RB:
+┌─────────┬───────────────────────┬───────┬─────┬──────┬────────────────────┬────────────────────┬───────────────┐
+│ (index) │ player                │ team  │ bye │ adp  │ weeks 1-14         │ weeks 15-17        │ playoff shift │
+├─────────┼───────────────────────┼───────┼─────┼──────┼────────────────────┼────────────────────┼───────────────┤
+│ 0       │ 'Jeremiyah Love'      │ 'ARI' │ 14  │ 26.7 │ 'F · 3rd hardest'  │ 'A · 2nd easiest'  │ 'much easier' │
+│ 21      │ 'Saquon Barkley'      │ 'PHI' │ 10  │ 13.8 │ 'A · 2nd easiest'  │ 'D · 4th hardest'  │ 'much harder' │
+│ 23      │ 'Christian McCaffrey' │ 'SF'  │ 8   │ 5.8  │ 'C · 16th easiest' │ 'F · 2nd hardest'  │ 'much harder' │
+└─────────┴───────────────────────┴───────┴─────┴──────┴────────────────────┴────────────────────┴───────────────┘
+```
+
+Each cell is a grade curved against all 32 teams (A = easiest ~10%, F = hardest ~10%) followed by the exact placing, counted from whichever end is nearer — "2nd hardest" rather than "31st easiest", because nobody counts a bad schedule from the good end. The letter is for scanning a column at a glance; the placing is what separates the 2nd-easiest playoff draw from the 6th, which a letter alone buckets together. Both are computed *within* a position, because a defense that stuffs the run while leaking to tight ends is not "good" in a way that means anything until you say good against whom.
+
+`playoff shift` is the column worth reading. Barkley has the 2nd-easiest RB schedule over weeks 1-14 and the 4th-hardest over 15-17 — a real cost that a single full-season number averages into nothing.
+
+⚠️ These are placings, not magnitudes. Three playoff games swing much wider than fourteen regular-season ones (the 2026 spread is 74.7-130.7 against 91.5-112.6), so 2nd-easiest over weeks 15-17 is a bigger real edge than 2nd-easiest over weeks 1-14 — and Love's regular-season F is only about 4% below average, because over fourteen games the whole league converges toward it.
+
+The ratings price the 2026 schedule using **2025** defensive results, because in August no 2026 defensive snap has happened. That is the method every public SOS table uses, and computing it independently from raw play-by-play reproduced Yahoo's published 2026 WR playoff numbers to about a point (CLE 114.7 vs their 114.4). It is still last year's defenses — personnel turns over hard — so it belongs in a tiebreak between similar players, not in a decision to move someone across tiers.
+
 **`npm run report`** — cross-platform sanity checks and arbitrage:
 
 ```
@@ -80,6 +102,7 @@ All unauthenticated — no API keys, no OAuth, nothing to configure.
 | **ESPN** | ADP, projections, auction values, per-format ranks | Undocumented API. ADP is one global series; only *ranks* vary by format |
 | **Sleeper** | Player identity + ADP + projections | Direct from Sleeper's API — no scraping |
 | **Yahoo** | ADP + auction values | Yahoo's public `pub-api-ro` host, the same one their own site calls — no login. Doesn't publish projected points; that's why `values` only shows ESPN and Sleeper's |
+| **nflverse** | NFL schedule + weekly player stats | Static, versioned release files on GitHub — the open-source data layer behind most public NFL analytics. Feeds `sos` only; no ADP |
 
 Every source above is a real, unauthenticated API — nothing here is a page scrape. That wasn't always true: earlier versions pulled Sleeper ADP and FantasyPros ADP/expert rankings through a third-party scrape (beatadp.com) and FantasyPros' own pages. Both broke in production and were replaced. FantasyPros expert rankings had no key-free replacement, so that signal is gone; its 18 days of history are kept as a frozen archive in `data/silver/ecr_snapshots.parquet` rather than deleted.
 
@@ -95,7 +118,7 @@ Two workflows, both in `.github/workflows/`:
 
 ### Reading the report without cloning anything
 
-Two routes. Both show the same content — the integrity checks, cross-platform arbitrage, and the value board for QB/RB/WR/TE.
+Two routes. Both show the same content — the integrity checks, cross-platform arbitrage, the value board, and strength of schedule for QB/RB/WR/TE.
 
 **1. [REPORT.md](./REPORT.md) — today's report, no account needed**
 
@@ -112,7 +135,7 @@ Every run keeps its own copy, so you can read a specific day without digging thr
 
 > **Note:** GitHub only shows run summaries and logs to signed-in users. Any GitHub account works — it doesn't need to be yours, and the repo is public — but a logged-out visitor will just see "Sign in to view logs". If you want a link to send someone without an account, use `REPORT.md` above.
 
-Both routes come from `npm run report:md` and `npm run values:md` — the same `report` and `values` you'd run locally, with Markdown tables instead of terminal box-drawing. Identical numbers, same code path.
+Both routes come from `npm run report:md`, `npm run values:md`, and `npm run sos:md` — the same `report`, `values`, and `sos` you'd run locally, with Markdown tables instead of terminal box-drawing. Identical numbers, same code path.
 
 ### When it breaks
 
@@ -124,12 +147,12 @@ The ingest is also guarded against overwriting good history with something worse
 
 ```
 src/
-  ingest/     one module per source (espn, sleeper, sleeper-projections, yahoo)
+  ingest/     one module per source (espn, sleeper, sleeper-projections, yahoo, nflverse)
   resolve/    entity resolution (name normalization, aliases, crosswalk)
-  metrics/    replacement level, VORP, tiers, projection blending, source-agreement checks
+  metrics/    replacement level, VORP, tiers, strength of schedule, projection blending, source-agreement checks
   lib/        http + retry, bronze archival, ingest-time guards
   db/         DuckDB schema and client, including the history-loss guard
-  scripts/    daily-ingest, report, values, tiers
+  scripts/    daily-ingest, report, values, tiers, sos
 data/
   bronze/     raw payloads, gzipped, partitioned by source + date
   silver/     Parquet exports — the committed, append-only history

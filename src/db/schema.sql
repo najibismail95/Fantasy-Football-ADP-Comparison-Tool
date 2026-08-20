@@ -69,6 +69,42 @@ CREATE TABLE IF NOT EXISTS projections (
   captured_at   DATE
 );
 
+-- Strength of schedule, per team per position per week-range.
+--
+-- NOT a time series, and deliberately not keyed by capture date like the
+-- tables above. SOS is SEASONAL reference data: opponents are fixed when the
+-- schedule is released, and the basis season's defensive results are final.
+-- Recomputing it daily would append 256 identical rows a day and, worse, would
+-- re-download ~11MB of nflverse CSV on every CI run to learn nothing new.
+--
+-- So it is keyed by (season, basis_season) and replaced wholesale when it
+-- actually changes. `computed_at` records WHEN the numbers were derived; it is
+-- not part of the key and must not be treated as history.
+--
+-- basis_season is stored rather than assumed because it is the single most
+-- important caveat on every number here: these ratings price next season's
+-- schedule using last season's defenses. Keeping it in the data means a reader
+-- who finds this table in six months can see what it was actually built from.
+--
+-- bye_week is per-team and repeats across a team's position/split rows. It is
+-- denormalized on purpose — 256 rows total, and a separate table for one
+-- integer per team would cost a join on every read for no benefit.
+CREATE TABLE IF NOT EXISTS sos_ratings (
+  season        INTEGER,   -- season being played
+  basis_season  INTEGER,   -- season whose defensive results built the index
+  team          VARCHAR,
+  position      VARCHAR,
+  split         VARCHAR,   -- 'regular' | 'playoffs'
+  week_lo       INTEGER,   -- inclusive; stored so the split's meaning is in the data
+  week_hi       INTEGER,
+  sos_index     DOUBLE,    -- 100 = league average, higher = easier
+  sos_rank      INTEGER,   -- 1 = easiest, within (position, split)
+  sos_grade     VARCHAR,   -- A-F curved within (position, split); A = easiest ~10%
+  games         INTEGER,   -- games in range; 13 not 14 for a team with a bye
+  bye_week      INTEGER,
+  computed_at   DATE
+);
+
 -- Surfaced, never silently dropped — a missing player during draft season is
 -- exactly the rookie/UDFA case you most need to notice.
 CREATE TABLE IF NOT EXISTS unresolved (

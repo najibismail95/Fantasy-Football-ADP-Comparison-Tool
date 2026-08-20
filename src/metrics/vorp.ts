@@ -1,4 +1,7 @@
 import type { ReplacementLevel } from './replacement.js';
+import { curveGrades, type Grade } from './grade.js';
+
+export type { Grade };
 
 export type VorpInput = {
   playerId: string;
@@ -151,30 +154,11 @@ export function computeValueScore(
   return out;
 }
 
-export type Grade = 'A' | 'B' | 'C' | 'D' | 'F';
-
 export type GradedResult = ValueResult & {
   grade: Grade;
   /** Standard deviations from the mean valueScore at his position. */
   z: number;
 };
-
-/**
- * Classic 10-20-40-20-10 grading curve, in standard deviations from the mean.
- * These cutoffs are the traditional ones for curving a normal distribution:
- * A = top ~10%, B = next ~20%, C = middle ~40%, D = next ~20%, F = bottom ~10%.
- */
-const CURVE: readonly [number, Grade][] = [
-  [1.28, 'A'],
-  [0.52, 'B'],
-  [-0.52, 'C'],
-  [-1.28, 'D'],
-];
-
-function letterFor(z: number): Grade {
-  for (const [cutoff, grade] of CURVE) if (z >= cutoff) return grade;
-  return 'F';
-}
 
 /**
  * Grades valueScore on a curve WITHIN each position, not on a fixed threshold.
@@ -205,15 +189,8 @@ export function gradeValueScores(results: readonly ValueResult[]): GradedResult[
 
   const out: GradedResult[] = [];
   for (const arr of byPos.values()) {
-    const scores = arr.map((r) => r.valueScore);
-    const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
-    const variance = scores.reduce((a, b) => a + (b - mean) ** 2, 0) / scores.length;
-    const sd = Math.sqrt(variance);
-
-    for (const r of arr) {
-      const z = arr.length < 4 || sd === 0 ? 0 : (r.valueScore - mean) / sd;
-      out.push({ ...r, z, grade: letterFor(z) });
-    }
+    const graded = curveGrades(arr.map((r) => r.valueScore));
+    arr.forEach((r, i) => out.push({ ...r, ...graded[i]! }));
   }
   return out;
 }

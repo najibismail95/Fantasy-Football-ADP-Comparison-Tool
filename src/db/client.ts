@@ -213,6 +213,39 @@ export async function assertExportSafe(
  * INSERT ... BY NAME matches columns by name, so adding a column to the schema
  * later doesn't break loading older Parquet (new columns come back NULL).
  */
+/**
+ * Load a REFERENCE table from Parquet, but only when it is empty.
+ *
+ * hydrateFromParquet above is the wrong tool for a table that isn't keyed by
+ * capture date. Its merge is "add every date I don't already have", which is
+ * exactly right for a time series and actively wrong for reference data: a
+ * laptop holding sos_ratings computed on the 19th, hydrating a Parquet CI
+ * computed on the 20th, would keep BOTH — two complete rating sets differing
+ * only in computed_at, silently doubling every row the next query touches.
+ *
+ * Empty-or-nothing is the whole contract. A populated reference table is
+ * already authoritative; refreshing it is replaceAll's job, not hydration's.
+ */
+export async function hydrateReference(
+  conn: DuckDBConnection,
+  table: string,
+  dir: string,
+): Promise<number> {
+  const file = path.join(dir, `${table}.parquet`);
+  try {
+    await fs.access(file);
+  } catch {
+    return 0; // never exported yet
+  }
+
+  const have = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${table}`);
+  if (Number((have.getRowObjectsJson() as { n: string | number }[])[0]?.n ?? 0) > 0) return 0;
+
+  await conn.run(`INSERT INTO ${table} BY NAME SELECT * FROM read_parquet('${file}')`);
+  const after = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${table}`);
+  return Number((after.getRowObjectsJson() as { n: string | number }[])[0]?.n ?? 0);
+}
+
 export async function hydrateFromParquet(
   conn: DuckDBConnection,
   tables: readonly string[],
