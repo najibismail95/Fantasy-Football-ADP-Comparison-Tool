@@ -77,4 +77,4 @@ metrics_gold(player_id, format_id, norm_adp_by_source, arb_gap_rounds,
 
 Idempotency key: `(source, format_id, capture_date)` — re-running a day's ingest overwrites cleanly.
 
-`player_xref` now spans **four** ID spaces: your canonical ID, Sleeper's, ESPN's, and beatadp's own `player.id`. See [PLAN.md §0.5](./PLAN.md) — the crosswalk gap is the single biggest time sink in this build.
+`player_xref` spans **four** ID spaces: your canonical ID, Sleeper's, ESPN's, and Yahoo's own `player_key`. See [CROSSWALK.md](./CROSSWALK.md) — the crosswalk gap was the single biggest time sink in this build.

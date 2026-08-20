@@ -6,15 +6,17 @@ The original plan pinned one canonical format (12-team PPR 1QB) and treated form
 
 ---
 
-## 1. What formats we can actually get (spike results)
+## 1. What formats we can actually get
 
-| Format | ESPN ADP | ESPN rank | Sleeper (beatadp) | FantasyPros ECR |
+Original spike results below (2026-07-26) measured this against ESPN, Sleeper-via-beatadp, and FantasyPros — the only sources available at the time. Sleeper ADP now comes directly from Sleeper's own API instead of beatadp, and Yahoo has since been added; both are still PPR/1QB only, so the shape of the finding hasn't changed even though beatadp and FantasyPros ECR are gone. Current sources:
+
+| Format | ESPN ADP | ESPN rank | Sleeper | Yahoo ADP |
 |---|---|---|---|---|
-| **PPR, 1QB** | ✅ | ✅ `PPR` | ✅ | ✅ `ppr-cheatsheets.php` |
-| **Standard** | ⚠️ *same series* | ✅ `STANDARD` | ❌ | ✅ `consensus-cheatsheets.php` |
-| **Half PPR** | ⚠️ *same series* | ❌ | ❌ | ✅ `half-point-ppr-cheatsheets.php` |
-| **Superflex** | ⚠️ *same series* | ✅ `SUPERFLEX` | ❌ | ✅ `superflex-cheatsheets.php` (530 players) |
-| TE premium / 2QB / dynasty | ❌ | ❌ | ❌ | ❌ (302 redirect — paywalled) |
+| **PPR, 1QB** | ✅ | ✅ `PPR` | ✅ | ✅ (unlabeled — see below) |
+| **Standard** | ⚠️ *same series* | ✅ `STANDARD` | ❌ | ❌ |
+| **Half PPR** | ⚠️ *same series* | ❌ | ❌ | ❌ |
+| **Superflex** | ⚠️ *same series* | ✅ `SUPERFLEX` | ❌ | ❌ |
+| TE premium / 2QB / dynasty | ❌ | ❌ | ❌ | ❌ |
 
 ### ⚠️ ESPN's ADP is a single global series
 
@@ -24,9 +26,9 @@ What *is* format-specific is `draftRanksByRankType`, which carries four variants
 
 **So for any non-PPR format, ESPN gives you ranks, not ADP** — the same rank-vs-ADP unit distinction as [PLAN.md §0.3](./PLAN.md). Don't let a superflex rank enter an ADP column.
 
-### beatadp is PPR/1QB only
+### Sleeper and Yahoo ADP are PPR/1QB only
 
-Probed `?scoring=HALF_PPR`, `?format=SUPERFLEX`, `?qb=SUPERFLEX`, `?teams=10` — **all ignored**, identical payload every time. Since beatadp is the only Sleeper ADP source, **Sleeper ADP exists for PPR/1QB and nothing else.**
+Originally probed against beatadp — `?scoring=HALF_PPR`, `?format=SUPERFLEX`, `?qb=SUPERFLEX`, `?teams=10` were **all ignored**, identical payload every time. That's still the practical constraint even now that Sleeper ADP comes from Sleeper's own endpoint directly: it exposes one series, no format parameter. Yahoo's `pub-api-ro` is the same shape — no scoring metadata in the response to select or even confirm against, so its ADP is captured as `YAHOO_DEFAULT` rather than asserted to be any specific format. **Sleeper and Yahoo ADP exist for PPR/1QB (Yahoo: presumed) and nothing else.**
 
 ### ESPN's superflex ranks are real — and dramatic
 
@@ -39,7 +41,7 @@ Probed `?scoring=HALF_PPR`, `?format=SUPERFLEX`, `?qb=SUPERFLEX`, `?teams=10` �
 | Josh Allen | 36 | **5** | +31 |
 | *Jahmyr Gibbs (control)* | *1* | *8* | *−7* |
 
-This confirms the "superflex moves QBs 3+ rounds" claim with measured data, and it means **superflex is genuinely supported** — via ESPN ranks and FantasyPros ECR, just not via ADP.
+This confirms the "superflex moves QBs 3+ rounds" claim with measured data, and it means **superflex is genuinely supported** — via ESPN ranks, just not via ADP. (Originally also corroborated by FantasyPros' superflex ECR page; that signal is gone along with FantasyPros — see [README.md](./README.md#data-sources).)
 
 ---
 
