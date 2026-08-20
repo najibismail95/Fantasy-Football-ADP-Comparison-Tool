@@ -151,8 +151,19 @@ const board = (pos?: string) =>
       produces_like: `${r.pos}${r.vorpRank}`,
       espn_pts: rawPtsByPlayer.get(r.playerId)?.ESPN?.toFixed(0) ?? '—',
       sleeper_pts: rawPtsByPlayer.get(r.playerId)?.SLEEPER?.toFixed(0) ?? '—',
-      edge_pts: `${r.valueScore >= 0 ? '+' : ''}${r.valueScore.toFixed(1)}`,
-    }));
+      // valueScore (formerly a printed edge_pts column) still drives the sort
+      // above and decides who makes this top-15 — just not printed as its own
+      // number. It survived one real bug (Bryce Young inflated by one outlier
+      // neighbor, see vorp.ts) and, once fixed, a second look decided a raw
+      // points differential between two sources doesn't need its own column
+      // when drafted_as/produces_like/espn_pts/sleeper_pts already show
+      // everything a reader needs to judge the pick themselves.
+    }))
+    // Selection above is by value — that decides WHO makes this top-15.
+    // Display order is alphabetical by name, so the printed table reads as a
+    // browsable list rather than a ranking a reader might mistake for "best
+    // to worst" now that there's no visible score to justify the order.
+    .sort((a, b) => a.player.localeCompare(b.player));
 
 // Column names are backticked in Markdown: they contain underscores, and bare
 // underscores inside the italicised note below are ambiguous emphasis markers.
@@ -160,8 +171,8 @@ const board = (pos?: string) =>
 const col = (name: string) => (MARKDOWN ? `\`${name}\`` : name);
 const legend =
   `${col('espn_pts')}/${col('sleeper_pts')}: each source's own ${cfg.scoring} ` +
-  `projection — compare them yourself; ${col('edge_pts')} is how far the blend ` +
-  'of the two beats (+) or misses (-) what a typical player at his ADP slot produces.';
+  `projection, compare them yourself. Rows are sorted by projected production ` +
+  `relative to draft cost — biggest value first.`;
 const thinDataNote =
   `${droppedForThinData} players excluded league-wide: fewer than 2 real ADP ` +
   `sources after removing values censored at a source's ceiling.`;
