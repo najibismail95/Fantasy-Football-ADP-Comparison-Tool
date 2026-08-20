@@ -67,6 +67,26 @@ export const SOURCES = {
     projections: (season: number) =>
       `https://api.sleeper.app/v1/projections/nfl/regular/${season}`,
   },
+  /**
+   * nflverse — the open-source NFL data project behind most of the public
+   * R/Python fantasy analytics work. Used for strength of schedule, which
+   * needs two things no ADP source publishes: who each team plays in each
+   * week, and how many points each defense allowed by position.
+   *
+   * Different in kind from the sources above, and better: these are static,
+   * versioned release assets on GitHub rather than an undocumented endpoint
+   * that can change shape without notice. Nothing here is scraped.
+   *
+   * `games` carries every season's schedule in one file, including the full
+   * 2026 slate with scores still empty. `weeklyStats` is per season and is
+   * where fantasy_points_ppr + opponent_team come from.
+   */
+  nflverse: {
+    games: 'https://github.com/nflverse/nflverse-data/releases/download/schedules/games.csv',
+    weeklyStats: (season: number) =>
+      'https://github.com/nflverse/nflverse-data/releases/download/stats_player/' +
+      `stats_player_week_${season}.csv`,
+  },
 } as const;
 
 /** Sleeper's per-scoring projection keys. */

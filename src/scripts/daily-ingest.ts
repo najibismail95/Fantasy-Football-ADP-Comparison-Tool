@@ -7,9 +7,12 @@ import { fetchYahoo, parseYahoo } from '../ingest/yahoo.js';
 import {
   fetchSleeperProjections, parseSleeperProjections, parseSleeperAdp,
 } from '../ingest/sleeper-projections.js';
+import { refreshSosRatings } from '../ingest/nflverse.js';
 import {
-  assertExportSafe, exportParquet, hydrateFromParquet, openDb, replaceAll, replaceDay,
+  assertExportSafe, exportParquet, hydrateFromParquet, hydrateReference, openDb,
+  replaceAll, replaceDay,
 } from '../db/client.js';
+import { table } from '../lib/render.js';
 import type { UnresolvedRow } from '../types.js';
 
 /**
@@ -39,9 +42,30 @@ const TIME_SERIES_TABLES = [
  * and deliberately NOT hydrated — hydrating it would reload yesterday's rows
  * and collide with today's insert.
  */
-const EXPORTED_TABLES = ['players', ...TIME_SERIES_TABLES] as const;
+/**
+ * Tables that are current-state rather than history, and so are exempt from
+ * the history-loss guard.
+ *
+ * The exemption is not cosmetic: assertNoHistoryLoss compares capture dates
+ * via a `captured_at` column, and neither of these is keyed that way —
+ * `sos_ratings` records `computed_at` precisely because it is NOT a series, so
+ * guarding it would fail to bind rather than pass a check. That would have
+ * survived the first CI run (no Parquet on disk yet means nothing to lose) and
+ * broken the second.
+ *
+ * `sos_ratings` is seasonal reference data: exported so a fresh clone and CI
+ * both inherit it without re-downloading ~11MB of nflverse CSV, but hydrated
+ * through hydrateReference (empty-or-nothing) rather than the per-date merge,
+ * which would keep two complete rating sets differing only in computed_at.
+ */
+const REFERENCE_TABLES = ['players', 'sos_ratings'] as const;
+
+const EXPORTED_TABLES = [...REFERENCE_TABLES, ...TIME_SERIES_TABLES] as const;
 
 const DRY = process.argv.includes('--dry-run');
+
+/** Recompute SOS even though ratings for the season already exist. */
+const REFRESH_SOS = process.argv.includes('--refresh-sos');
 
 /** Fail the run if a top-N player can't be resolved — catches August rookie churn. */
 const COVERAGE_GATE_TOP_N = 200;
@@ -169,9 +193,31 @@ async function main() {
   console.log('\nwritten:');
   for (const [t, n] of Object.entries(counts)) console.log(`  ${t.padEnd(16)} ${n}`);
 
+  // 6. Strength of schedule. Seasonal reference data rather than part of the
+  //    daily series, so it is hydrated empty-or-nothing and normally skips the
+  //    download entirely — see refreshSosRatings and db/schema.sql.
+  await hydrateReference(conn, 'sos_ratings', SILVER);
+  const sos = await refreshSosRatings(conn, state.season, captureDate, { force: REFRESH_SOS });
+  console.log(
+    `\nstrength of schedule: ${sos.rows} ratings for ${state.season} on ${sos.basisSeason} defenses` +
+      `${sos.refreshed ? ' (recomputed)' : ' (cached, no download)'}`,
+  );
+
+  // Ranked 1-32 within each position, so these are the teams whose players
+  // draw the softest defenses in weeks 15-17 — the three weeks that decide a
+  // title, and the reason this is split out from the full-season number.
+  const softest = (await conn.runAndReadAll(`
+    SELECT position AS pos,
+           string_agg(team || ' ' || round(sos_index) :: INTEGER, '  ' ORDER BY sos_rank) AS easiest_playoff_matchups
+    FROM sos_ratings
+    WHERE season = ${state.season} AND split = 'playoffs' AND sos_rank <= 4
+    GROUP BY 1 ORDER BY 1
+  `)).getRowObjectsJson();
+  table(softest);
+
   // Guarded: the export overwrites the committed history wholesale, so it must
-  // refuse to drop a capture date. `players` is exempt — it is current-state by
-  // design (see replaceAll), so its single captured_at moves forward every run.
+  // refuse to drop a capture date. REFERENCE_TABLES are exempt — they are
+  // current-state by design (see replaceAll), not a series to lose days from.
   //
   // knownDates is the set of dates this database actually holds, taken from
   // adp_snapshots as the anchor. Without it, a table that is legitimately EMPTY
@@ -186,7 +232,8 @@ async function main() {
   // Parquet untouched, not half-rewritten.
   await assertExportSafe(conn, TIME_SERIES_TABLES, SILVER, { knownDates });
   for (const t of EXPORTED_TABLES) {
-    await exportParquet(conn, t, SILVER, { guardHistory: t !== 'players', knownDates });
+    const isReference = (REFERENCE_TABLES as readonly string[]).includes(t);
+    await exportParquet(conn, t, SILVER, { guardHistory: !isReference, knownDates });
   }
 
   const days = await conn.runAndReadAll(
