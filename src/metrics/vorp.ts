@@ -41,6 +41,12 @@ export type ValueResult = ValueInput & {
   valueScore: number;
 };
 
+const median = (nums: readonly number[]): number => {
+  const s = [...nums].sort((a, b) => a - b);
+  const mid = Math.floor(s.length / 2);
+  return s.length % 2 ? s[mid]! : (s[mid - 1]! + s[mid]!) / 2;
+};
+
 /**
  * Ranks each player against his OWN position on both axes before comparing —
  * the same fix as the ECR-vs-ADP table in report.ts (PLAN.md §2), for the
@@ -59,8 +65,54 @@ export type ValueResult = ValueInput & {
  * based score can't tell a 6-spot move at the bottom from one at the top; a
  * points-based score can, because it asks "how many points is he beating the
  * player who WOULD have been taken at his actual ADP slot" directly.
+ *
+ * ⚠️ "Expectation at his ADP slot" is a WINDOWED MEDIAN of nearby production
+ * ranks when his ADP rank and production rank disagree, not one single
+ * neighbor. An earlier version compared against exactly one player — whoever
+ * holds the matching production rank — and that broke on Bryce Young
+ * (2026-08-18, ADP rank 28 of 28 drafted QBs): the player holding
+ * production-rank 28 was Aaron Rodgers, the single worst producer in the
+ * entire pool despite still going ahead of him on name recognition. Bryce
+ * Young "beating" Aaron Rodgers by 38 points looked like a huge value; it was
+ * really just "not the worst QB available," inflated by comparing against one
+ * outlier instead of a trend. A median over several nearby ranks absorbs one
+ * bad neighbor instead of being defined by it.
+ *
+ * When his ADP rank EQUALS his production rank exactly, valueScore is forced
+ * to 0 rather than computed from the window. Windowing alone breaks this case
+ * in the opposite direction from the Bryce Young problem: for the actual #1
+ * player at a position, every neighbor in any window is necessarily WORSE
+ * than him (there is no rank 0), so comparing him against nearby-but-worse
+ * players manufactured a large fake edge for players the market prices
+ * exactly correctly — Josh Allen showed +45 despite being the consensus QB1
+ * by both ADP and production, i.e. zero actual mispricing. The exact-match
+ * case has an unambiguous right answer (his own production IS the market's
+ * expectation, so there is nothing to be over or under), so it bypasses the
+ * window entirely instead of trying to make windowing produce zero.
+ *
+ * The window itself is NOT leave-one-out (unlike report.ts's arbitrage
+ * comparison) — his own value is included alongside his neighbors'. Excluding
+ * self mattered less than it first appeared: a median only cares about the
+ * middle of a sorted set, so excluding one entry rarely moves it unless that
+ * entry WAS the median. Including self does measurably help the near-miss
+ * cases (adpRank and vorpRank one apart), pulling the comparison slightly
+ * toward his own number rather than purely his neighbors'.
+ *
+ * Known residual: within 1 rank of a position's very top or bottom, the
+ * window can only extend one direction (no rank 0 exists), which can pull the
+ * comparison across a real tier boundary and flip the expected sign for a
+ * player barely off an exact match — e.g. the WR1 by ADP who is actually the
+ * 2nd-best producer can still show a small POSITIVE score if the 3rd- and
+ * 4th-best producers are notably worse, since the median lands below his own
+ * number despite someone else outproducing him. Measured: 4 of 223 players
+ * (2026-08-19 data), all within 1 rank of an edge, all under 14 points —
+ * nothing like the 38-point distortion this was built to fix. Documented
+ * rather than chased further.
  */
-export function computeValueScore(players: readonly ValueInput[]): ValueResult[] {
+export function computeValueScore(
+  players: readonly ValueInput[],
+  { windowRadius = 3 } = {},
+): ValueResult[] {
   const byPos = new Map<string, ValueInput[]>();
   for (const p of players) {
     let arr = byPos.get(p.pos);
@@ -72,9 +124,6 @@ export function computeValueScore(players: readonly ValueInput[]): ValueResult[]
   for (const arr of byPos.values()) {
     const byVorp = [...arr].sort((a, b) => b.vorp - a.vorp);
     const vorpRank = new Map(byVorp.map((p, i) => [p.playerId, i + 1]));
-    // What a typical pick at rank K actually produces, in VORP points —
-    // the "expectation" a player's own production is compared against.
-    const vorpAtRank = new Map(byVorp.map((p, i) => [i + 1, p.vorp]));
 
     const byAdp = [...arr].sort((a, b) => a.adp - b.adp);
     const adpRank = new Map(byAdp.map((p, i) => [p.playerId, i + 1]));
@@ -82,10 +131,21 @@ export function computeValueScore(players: readonly ValueInput[]): ValueResult[]
     for (const p of arr) {
       const vr = vorpRank.get(p.playerId)!;
       const ar = adpRank.get(p.playerId)!;
-      // Same pool backs both maps, so rank ar always has an entry — no
-      // fallback needed, but ?? guards against a future refactor breaking that.
-      const expectedVorp = vorpAtRank.get(ar) ?? p.vorp;
-      out.push({ ...p, vorpRank: vr, adpRank: ar, valueScore: p.vorp - expectedVorp });
+      let valueScore: number;
+      if (ar === vr) {
+        valueScore = 0;
+      } else {
+        // Window of production ranks centered on his ADP rank (ar-1 in the
+        // 0-indexed byVorp array), clamped to the pool's bounds — a player
+        // near either end of the position just gets a one-sided window
+        // rather than an out-of-range lookup.
+        const centerIdx = ar - 1;
+        const lo = Math.max(0, centerIdx - windowRadius);
+        const hi = Math.min(byVorp.length - 1, centerIdx + windowRadius);
+        const expectedVorp = median(byVorp.slice(lo, hi + 1).map((w) => w.vorp));
+        valueScore = p.vorp - expectedVorp;
+      }
+      out.push({ ...p, vorpRank: vr, adpRank: ar, valueScore });
     }
   }
   return out;

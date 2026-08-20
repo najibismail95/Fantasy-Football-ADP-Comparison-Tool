@@ -81,7 +81,7 @@ table(
   FROM player_xref_current GROUP BY 1,2 ORDER BY source, n DESC`),
 );
 
-heading('A. Cross-platform arbitrage: leave-one-out median (PPR/1QB)');
+heading('Cross-platform arbitrage: leave-one-out median (PPR/1QB)');
 // Each source is compared against the MEDIAN OF THE OTHER SOURCES, not against
 // one other platform pairwise.
 //
@@ -137,30 +137,39 @@ table(
            round(max(adp) FILTER (WHERE source = 'SLEEPER'),1) AS sleeper_adp,
            round(max(adp) FILTER (WHERE source = 'YAHOO'),1)   AS yahoo_adp
     FROM clean GROUP BY 1
+  ),
+  -- Selection happens HERE: biggest gap first, capped at 20. That ordering is
+  -- what decides who makes the table at all, so it stays inside the CTE.
+  -- Display order (outer SELECT below) is alphabetical instead, same reasoning
+  -- as values.ts — a browsable list, not a ranking the row order implies.
+  selected AS (
+    SELECT p.display_name AS player, p.position AS pos,
+           s.espn_adp, s.sleeper_adp, s.yahoo_adp,
+           r.source AS outlier_source,
+           round(abs(r.deviation)/12.0,1) AS rounds,
+           CASE WHEN r.deviation > 0 THEN 'CHEAPER on ' || r.source
+                ELSE 'pricier on ' || r.source END AS verdict,
+           round(pr.proj_points,0) AS proj_pts,
+           abs(r.deviation) AS abs_deviation
+    FROM ranked r
+    JOIN players p USING (player_id)
+    JOIN per_source s USING (player_id)
+    -- Aggregated, NOT joined raw: projections now carry one row per SOURCE
+    -- (ESPN + Sleeper), so a plain LEFT JOIN would duplicate every arbitrage
+    -- row per source — the same fanout that multi-day data caused earlier.
+    LEFT JOIN (
+      SELECT player_id, avg(proj_points) AS proj_points
+      FROM projections_current WHERE scoring = 'PPR' GROUP BY 1
+    ) pr USING (player_id)
+    WHERE r.rn = 1
+      AND r.others_spread <= 25          -- the other two must actually agree
+      AND abs(r.deviation) >= 30         -- and the outlier must be >2.5 rounds off
+      AND r.others_med < 160             -- keep it to players who get drafted
+      AND p.position NOT IN ('K','DEF')  -- kicker/DEF ADP swings aren't actionable
+    ORDER BY abs_deviation DESC LIMIT 20
   )
-  SELECT p.display_name AS player, p.position AS pos,
-         s.espn_adp, s.sleeper_adp, s.yahoo_adp,
-         r.source AS outlier_source,
-         round(abs(r.deviation)/12.0,1) AS rounds,
-         CASE WHEN r.deviation > 0 THEN 'CHEAPER on ' || r.source
-              ELSE 'pricier on ' || r.source END AS verdict,
-         round(pr.proj_points,0) AS proj_pts
-  FROM ranked r
-  JOIN players p USING (player_id)
-  JOIN per_source s USING (player_id)
-  -- Aggregated, NOT joined raw: projections now carry one row per SOURCE
-  -- (ESPN + Sleeper), so a plain LEFT JOIN would duplicate every arbitrage
-  -- row per source — the same fanout that multi-day data caused earlier.
-  LEFT JOIN (
-    SELECT player_id, avg(proj_points) AS proj_points
-    FROM projections_current WHERE scoring = 'PPR' GROUP BY 1
-  ) pr USING (player_id)
-  WHERE r.rn = 1
-    AND r.others_spread <= 25          -- the other two must actually agree
-    AND abs(r.deviation) >= 30         -- and the outlier must be >2.5 rounds off
-    AND r.others_med < 160             -- keep it to players who get drafted
-    AND p.position NOT IN ('K','DEF')  -- kicker/DEF ADP swings aren't actionable
-  ORDER BY abs(r.deviation) DESC LIMIT 20`),
+  SELECT player, pos, espn_adp, sleeper_adp, yahoo_adp, outlier_source, rounds, verdict, proj_pts
+  FROM selected ORDER BY player`),
 );
 
 /*
@@ -182,19 +191,5 @@ table(
  * is mispriced".
  */
 
-heading('B. Superflex: ESPN rank shift for QBs (FORMATS.md §1)');
-table(
-  await q(`
-  WITH r AS (
-    SELECT player_id,
-           max(rank) FILTER (WHERE rank_type='PPR')       AS ppr,
-           max(rank) FILTER (WHERE rank_type='SUPERFLEX') AS sflex
-    FROM rank_current GROUP BY 1)
-  SELECT p.display_name AS player, r.ppr, r.sflex, r.ppr - r.sflex AS moves_up
-  FROM r JOIN players p USING (player_id)
-  WHERE p.position='QB' AND r.ppr IS NOT NULL AND r.sflex IS NOT NULL
-  ORDER BY r.sflex LIMIT 6`),
-);
-
 heading('Unresolved players (surfaced, never dropped)');
-table(await q(`SELECT source, source_name, position FROM unresolved_current`));
+table(await q(`SELECT source, source_name, position FROM unresolved_current ORDER BY source_name`));
