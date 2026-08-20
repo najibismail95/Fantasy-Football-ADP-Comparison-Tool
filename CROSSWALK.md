@@ -1,10 +1,12 @@
 # Entity Resolution — Solved
 
-Answers [PLAN.md §0.6](./PLAN.md) ("the ID crosswalk is the biggest hidden trap"). Working implementation: [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs). All numbers measured against live data on 2026-07-26.
+Answers [PLAN.md §0.6](./PLAN.md) ("the ID crosswalk is the biggest hidden trap"). Working implementation: [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs), later ported into [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts). All numbers below measured against live data on 2026-07-26, back when beatadp and FantasyPros were still ingested sources — both have since been replaced by Yahoo's own API (see [README.md](./README.md#data-sources)).
+
+The numbers are kept as historical validation of the *design*, not a claim about current sources: the mechanism described here — tiered resolution, name normalization, the team-join for defenses, the 0.92 fuzzy threshold — is exactly what `crosswalk.ts` still does today against ESPN, Sleeper, and Yahoo. Swapping a source has never required touching the resolver itself, only which raw fields feed into it.
 
 ---
 
-## Result
+## Result (original spike, ESPN + beatadp + FantasyPros)
 
 | Source | Rows | Resolved | Unmatched |
 |---|---|---|---|
@@ -46,12 +48,12 @@ Resolution runs in tiers, cheapest first, stopping at the first hit:
 
 **2. Position vocabulary is not shared across sources.** This one is invisible until it bites:
 
-| Concept | Sleeper | ESPN | FantasyPros | beatadp |
-|---|---|---|---|---|
-| Defense | `DEF` | `16` | `DST` | `DEF` |
-| Fullback | `FB` | `2` (RB) | `RB` | `RB` |
+| Concept | Sleeper | ESPN | FantasyPros (original spike) |
+|---|---|---|---|
+| Defense | `DEF` | `16` | `DST` |
+| Fullback | `FB` | `2` (RB) | `RB` |
 
-Because position was a *blocking key*, every mismatch became a silent miss. Hunter Luepke is `FB` in Sleeper and `RB` everywhere else — he didn't fail fuzzy matching, he was never compared. Map everything through one vocabulary: `DST`/`D/ST` → `DEF`, `FB`/`HB` → `RB`, `PK` → `K`.
+Because position was a *blocking key*, every mismatch became a silent miss. Hunter Luepke is `FB` in Sleeper and `RB` everywhere else — he didn't fail fuzzy matching, he was never compared. Map everything through one vocabulary: `DST`/`D/ST` → `DEF`, `FB`/`HB` → `RB`, `PK` → `K`. The FantasyPros/`DST` mapping is now unreachable dead-source aliasing, kept intentionally rather than pruned — position is a blocking key, so a stale alias costs nothing while a missing one costs a silent miss. See `normPos` in `src/resolve/normalize.ts`.
 
 **3. Match defenses by team, never by name.** Three irreconcilable conventions:
 
@@ -88,7 +90,7 @@ Measured result: **32 teams, agreement 1.00** — every single vote unanimous. S
 |---|---|
 | Connor Heyward | Sleeper `TE`, ESPN `RB` — genuine cross-source disagreement (TE/FB tweener) |
 | Riley Nowakowski | Same |
-| Tommy Myers | **Not in Sleeper's dump at all** — FantasyPros lists him, the spine doesn't have him |
+| Tommy Myers | **Not in Sleeper's dump at all** — a source that DID list him didn't have him in the spine |
 
 Two distinct classes, each needing a policy decision rather than a better matcher:
 
@@ -104,7 +106,7 @@ Two distinct classes, each needing a policy decision rather than a better matche
 - **Track tier distribution over time.** A rise in `fuzzy` or `MISS` is the earliest signal a source changed its naming.
 - **Log every fuzzy match with its score** for spot-checking. At `fuzzy=0` today, any fuzzy hit is worth a look.
 - **Keep the threshold at 0.92.** Verified earlier that it cleanly separates true matches (`Kenneth Walker III` ~ `Kenneth Walker` = 0.956) from the dangerous same-surname false positive (`Josh Allen` ~ `Keenan Allen` = 0.589).
-- **`player_xref` spans four ID spaces** — yours, Sleeper's, ESPN's, beatadp's, plus FantasyPros'. Persist `(source, source_id, canonical_id, tier, score)` so every match is auditable after the fact.
+- **`player_xref` spans four ID spaces** — yours, Sleeper's, ESPN's, and Yahoo's. Persist `(source, source_id, canonical_id, tier, score)` so every match is auditable after the fact.
 
 ---
 
@@ -112,4 +114,4 @@ Two distinct classes, each needing a policy decision rather than a better matche
 
 PLAN.md §6 budgeted **2–3 days** for entity resolution as its own phase, and called it one of the two schedule risks. That was the right call given 44% coverage — but the problem is now solved and measured, and the implementation is ~120 lines.
 
-**Revise to half a day**: port [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) into the ingest pipeline, add the overrides file, add the CI gate. Phase 3 (normalization + metrics) is now the only remaining schedule risk.
+**Revised to half a day, and it held.** [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) was ported into the ingest pipeline as `src/resolve/crosswalk.ts`, the overrides file (`normalize.ts`'s `ALIASES`) is in place, and the CI coverage gate is live in `daily-ingest.ts`. All of PLAN.md §6's phases 1–3 are done now — see [PLAN.md §6](./PLAN.md) for the full status, including the one that was dropped rather than completed.

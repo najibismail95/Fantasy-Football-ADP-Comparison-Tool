@@ -40,7 +40,7 @@ RB · rounds 6-8 · sorted by value score:
 
 `drafted_as`/`produces_like` are his rank by ADP vs. by production, per position. `espn_pts`/`sleeper_pts` are each source's own number, not an average — deliberately shown raw rather than folded into a single "confidence" label, so a disagreement between the two models is something you see directly rather than something a computed flag claims on your behalf.
 
-**`npm run tiers POS`** — clusters a position by ADP (not raw projected points — see *Things that will bite you* below) and shows the point cliff between tiers:
+**`npm run tiers POS`** — clusters a position by ADP, not raw projected points, and shows the point cliff between tiers. Points alone don't tier the way people draft: elite RB projections form an uneven staircase where each of the top few backs sits 20+ points clear of the next, so clustering on points puts every elite back in his own tier of one — ADP matches how real drafters group them instead:
 
 ```
 TE tiers — 12-team PPR, 28 of 128 players in 8 tiers (drafted only)
@@ -69,7 +69,7 @@ Tier count scales to the draftable pool automatically — it's not a settable kn
 
 Each source's own ADP is shown raw, per platform — not collapsed into a summary — so you can see which two sources actually agree and by how much, not just trust a computed spread. A source is flagged as the outlier only when the *other two* independently agree within 25 picks of each other; a lone pairwise gap isn't enough, since it can't tell you which side moved.
 
-Also checks integrity (does each source's ADP still look like a real average, not a leaked rank column), resolution quality per source, and ESPN's rank shift for QBs in superflex leagues.
+Also checks integrity (does each source's ADP still look like a real average, not a leaked rank column) and resolution quality per source.
 
 ## Data sources
 
@@ -119,20 +119,6 @@ Both routes come from `npm run report:md` and `npm run values:md` — the same `
 A failed run isn't only a red X: a missed day is a permanent hole, because ADP can't be backfilled. So a failure opens a GitHub issue (reusing one open issue rather than filing a new one daily) and attaches the raw payloads as an artifact for 14 days, which is usually enough to tell a source outage apart from a parser that needs updating.
 
 The ingest is also guarded against overwriting good history with something worse — see the first two items below.
-
-## Things that will bite you
-
-Each of these caused a real bug during development and is now guarded in code:
-
-- **Not every "ADP" column is ADP.** A source's ADP field can quietly turn out to be a rank column (a beatadp column and an ESPN `SUPERFLEX` rank both were), and undrafted-player sentinels in Sleeper's raw feed look numeric but aren't real ADP. Every ADP field is asserted mostly-non-integer over its top 300 values on ingest — scoped to the top of the board on purpose, since a swapped-in rank column shows up there first, while the deep bench naturally has more whole-number ADPs as sample sizes thin out.
-- **History can only grow, never shrink.** The daily export overwrites the committed Parquet wholesale, so a stale local database — one that missed a day the scheduled run already captured — would silently commit a *shorter* history than what's already saved. The export refuses to write if it would drop a capture date that's already committed.
-- **An empty result for today isn't the same as no result for today.** A view built as "whatever the latest date in this table is" breaks the moment that table can legitimately have zero rows for today (e.g. every player resolved cleanly, so there's nothing to log) — it silently falls back to the last day that *did* have rows, which can be arbitrarily stale. Anchor "today" on a table that's always populated, not on the one that might be empty.
-- **ADP can't be backfilled.** Nobody publishes historical daily ADP. A missed day is gone permanently — which is why raw payloads are archived to `data/bronze/` before anything is parsed, and why the guard above exists at all.
-- **Higher ADP means cheaper.** It's a draft *position*, so a bigger number means the player lasts longer. Arbitrage output names the cheaper platform explicitly rather than emitting a signed gap that's easy to read backwards.
-- **Position vocabulary isn't shared.** Sleeper says `DEF`, ESPN says `16`; Sleeper lists some backs as `FB`. Position is a blocking key during matching, so every mismatch is a silent miss until normalized.
-- **A team ID of zero isn't a team.** ESPN uses `proTeamId: 0` for free agents. Left unguarded, a free agent whose name happened to match a real player got miscounted as a vote for that player's team, teaching the resolver a phantom 33rd "team." Free agents are now excluded from that vote.
-- **Projected points alone don't tier the way people draft.** Elite RB projections form an uneven staircase — each of the top few backs sits 20+ points clear of the next — so clustering on points put every elite back in his own tier of one, when real drafters treat them as a single "tier 1." Tiers cluster on ADP instead, which matches actual draft behavior; projections still drive VORP.
-- **A raw spread between two sources isn't a quality judgment on the player.** Two models disagreeing by 40 points on a locked-in elite receiver isn't a reason to doubt him — it just means the number is a guess at a midpoint between two big projections, not a corroborated one. `values` shows both raw numbers rather than a "confidence" label, so that distinction is visible instead of implied.
 
 ## Layout
 

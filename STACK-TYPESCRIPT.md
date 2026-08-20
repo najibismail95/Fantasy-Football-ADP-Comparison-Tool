@@ -1,8 +1,8 @@
 # TypeScript Stack — Verification Record
 
-**TypeScript is the chosen stack.** [PLAN.md §4](./PLAN.md) is the canonical stack table and project structure; this document is the evidence behind it — every library run on Node v24.11.1 on 2026-07-26, with the runnable proofs.
+**TypeScript is the chosen stack.** [PLAN.md §4](./PLAN.md) is the canonical stack table and project structure; this document is the evidence behind it — every library run on Node v24.11.1 on 2026-07-26, with the runnable proofs. See [PLAN.md's top-of-file note](./PLAN.md) for what's changed since — the short version: sources changed (beatadp/FantasyPros → Yahoo), and the natural-language layer (§7 below, PLAN.md §5) was tried and dropped.
 
-Keep this around for two reasons: §2 documents a **correction to the normalization method** that applies regardless of language, and §1.3 contains the isotonic implementation you'll need in `metrics/`.
+Keep this around for two reasons: §2 documents a **correction to the normalization method** that applies regardless of language, and §1.3 contains a working isotonic regression implementation — reference material rather than something in use, since what shipped is the simpler leave-one-out median instead (see PLAN.md §2, point 3, for why).
 
 ---
 
@@ -133,7 +133,7 @@ Moved to **[PLAN.md §4](./PLAN.md)** — that's the canonical version. This doc
 
 **If you later decide to model projections yourself** — gradient boosting on historical stats, bayesian hierarchical models, opponent adjustments — Python wins decisively. There is no TS equivalent of XGBoost/statsmodels/PyMC worth using, and hand-rolling is not viable.
 
-That is **not** a reason to reconsider now. The current design consumes ESPN's projections (verified available in the same payload), and everything on top — arbitrage, VORP, tiering, ECR comparison — is arithmetic and SQL. If projection modeling ever happens, it belongs in a **separate Python service** writing into the same DuckDB/Parquet layer, not a rewrite of this one.
+That is **not** a reason to reconsider now. The current design consumes ESPN's and Sleeper's projections (verified available in each payload, blended in `metrics/projections.ts`), and everything on top — arbitrage, VORP, tiering — is arithmetic and SQL. (Originally also "ECR comparison" — retired along with FantasyPros, see PLAN.md.) If projection modeling ever happens, it belongs in a **separate Python service** writing into the same DuckDB/Parquet layer, not a rewrite of this one.
 
 Secondary losses, all minor: no notebook workflow for exploration (mitigate with the DuckDB CLI); a smaller pool of copy-pasteable fantasy-analytics code, which skews Python.
 
@@ -141,7 +141,9 @@ Not a concern: JS numbers are IEEE-754 float64, identical to Python floats. No p
 
 ---
 
-## 6. Deployment consequence worth planning for
+## 6. Deployment consequence worth planning for — moot, no app was built
+
+This section planned for a Next.js app serving Parquet over Vercel; that app was never built (§7's natural-language layer, which this was deployment for, was tried and dropped). Kept for the reasoning, which resolved in the simplest of the three options actually listed below — worth noting for what it's worth.
 
 Vercel's filesystem is ephemeral, so a local DuckDB file won't persist between requests. The clean serverless shape:
 
@@ -151,10 +153,12 @@ Vercel's filesystem is ephemeral, so a local DuckDB file won't persist between r
 
 This is near-zero cost, keeps the append-only snapshot history intact, and the ingest runs on a schedule independent of the app. If you'd rather keep it simple, a single small VPS or even just running locally works identically — the DuckDB file is portable.
 
+**What actually happened:** step 1, unchanged. Steps 2–3 never applied — there's no app to serve to. GitHub Actions commits the Parquet straight back into the repo instead of R2/S3, and `REPORT.md` plus the Actions job summary serve the role an app would have (see [README.md — Automation](./README.md#automation)). Closest to the "just running locally" option mentioned above, except automated rather than local.
+
 ---
 
 ## 7. Project structure
 
 Moved to **[PLAN.md §4.2](./PLAN.md)**.
 
-Phasing is in [PLAN.md §6](./PLAN.md). Phase 2 (entity resolution) has since been **solved** — see [CROSSWALK.md](./CROSSWALK.md) — leaving Phase 3 (normalization + metrics) as the only remaining schedule risk.
+Phasing is in [PLAN.md §6](./PLAN.md). Phases 1–3 are all done — entity resolution ([CROSSWALK.md](./CROSSWALK.md)), ingestion, and normalization/metrics. Phase 4 (the NL layer) was tried and dropped rather than completed; see PLAN.md §6 for the full picture.

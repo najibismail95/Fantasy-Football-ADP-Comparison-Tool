@@ -2,6 +2,13 @@
 
 **Date:** 2026-07-26 · **Target season:** 2026 (drafts happening now — data is live)
 
+> **This is the original planning document, kept as-written.** It's background on *why* things were built the way they were, not a live description of the system today — for that, see [README.md](./README.md). The two biggest divergences from what's below:
+>
+> - **Sources changed.** beatadp (§0.2) and FantasyPros (§0.5, including expert rankings / ECR) were both replaced by **Yahoo's own API** after both scrapes broke in production. FantasyPros ECR has no key-free replacement, so that signal — §1's "Experts vs. market" — no longer exists. See [README.md — Data sources](./README.md#data-sources).
+> - **§5's natural-language layer was tried and dropped.** The system is CLI-only (`values`/`tiers`/`report`) by deliberate choice, not because §5 wasn't reached — see [README.md — Status](./README.md#status).
+>
+> Everything else — the entity-resolution method (§0.6, §3, now [CROSSWALK.md](./CROSSWALK.md)), the analytical reasoning in §2, the format-vs-config split ([FORMATS.md](./FORMATS.md)) — still holds and matches the current implementation.
+
 ---
 
 ## 0. Findings from live API probes
@@ -190,24 +197,21 @@ Missing include **Bucky Irving, Omarion Hampton, Khalil Shakir, Kyle Pitts, Puka
 
 ## 1. What the system actually does
 
-Three analytically distinct products. Conflating them is the most common way these tools go wrong.
+Originally three analytically distinct products; now two — **signal C below was retired along with FantasyPros ECR** (see the note at the top of this document). Conflating what remains is still the most common way these tools go wrong.
 
 **A. Market arbitrage** — *same player, different price across platforms.*
 > "Puka Nacua goes 4.9 on Sleeper but 3.65 on ESPN → he's meaningfully cheaper in Sleeper drafts."
 
-Actionable only if you know which platform you're drafting on. This is the cross-platform comparison you asked for.
+Actionable only if you know which platform you're drafting on. This is the cross-platform comparison you asked for. Shipped as `report`'s leave-one-out arbitrage table.
 
 **B. Value vs. projection (VORP/VBD)** — *is this player worth his cost at all?*
 > "This QB is going in round 12 but projects as QB14 — that's a value."
 
-This is what "value" and "bust" conventionally mean in fantasy, and it needs projections (which ESPN gives us free).
+This is what "value" and "bust" conventionally mean in fantasy, and it needs projections (ESPN and Sleeper both supply them, blended — see §4.1's note on why one alone isn't enough). Shipped as `values`.
 
-**C. Experts vs. market (ECR vs. ADP)** — *do the analysts and the drafting public disagree?*
-> "FantasyPros' 73 experts rank him RB12; the market drafts him at RB25."
+~~**C. Experts vs. market (ECR vs. ADP)**~~ *— retired.* Depended entirely on FantasyPros' expert consensus rankings, which no key-free source replaces. Was genuinely a different axis from A and B — A is *where* to draft him, B is *whether* he's worth it on projections, C would have been *whether informed opinion has caught up with the market*. Left here so a future signal source (if one ever publishes something similar) has a description of what to reconnect.
 
-Newly available via §0.5, and a genuinely different axis from A and B. A is *where* to draft him, B is *whether* he's worth it on projections, C is *whether informed opinion has caught up with the market* — or the reverse. Expert consensus often moves before ADP does, which makes a wide ECR-vs-ADP gap a candidate leading indicator. It is also the one signal here you can compute on day one without waiting to accumulate snapshot history.
-
-**The best signal is the intersection:** cheap on your platform *and* underpriced vs. projection *and* ranked above his cost by experts. A player who's cheap everywhere isn't an arbitrage — the market simply agrees he's bad.
+**With C gone, the best signal is the intersection of what's left:** cheap on your platform *and* underpriced vs. projection. A player who's cheap everywhere isn't an arbitrage — the market simply agrees he's bad.
 
 ---
 
@@ -225,10 +229,10 @@ You cannot subtract ESPN ADP from Sleeper ADP and call the result signal. Five c
 
 1. **Pin a canonical format for *arbitrage*; derive everything else from league config.** Cross-platform ADP comparison is limited to 12-team PPR 1QB (the only format all three sources publish). But VORP, replacement levels, tiers, and strategy are **computed from a roster config**, so they work for any league — superflex, 2-flex, no-kicker, TE-premium. This split is the core of **[FORMATS.md](./FORMATS.md)**; don't model format as a flat tag on ADP rows.
 2. **ADP → overall pick → `round.pick`.** Humans think in rounds; "late rounds" is only meaningful once you have this.
-3. **Correct for population drift before differencing.** Fit a monotone map (**isotonic regression**) from each platform's paired ADP *values* onto a reference. The residual *after* that map is the player-specific disagreement, in pick units. This removes confound #4, which naive subtraction leaves in.
+3. **Correct for population drift before differencing.** Originally planned as a fitted monotone map (**isotonic regression**) from each platform's paired ADP *values* onto a reference — never built. What shipped instead is simpler and turned out to be sufficient: **leave-one-out median**, comparing each source against the median of the *other* sources rather than fitting a curve. With 3 real ADP sources (ESPN/Sleeper/Yahoo) this localizes the true outlier the same way a fitted correction would, without needing enough historical pairs to fit one. See `report.ts`'s arbitrage query.
 
-   > ⚠️ **Do not use rank/quantile normalization (`PERCENT_RANK`) for this.** It is purely ordinal: when two platforms agree on ordering, every gap collapses to zero even where magnitudes differ by half a round — erasing exactly the arbitrage you're looking for. Demonstrated in [STACK-TYPESCRIPT.md §2](./STACK-TYPESCRIPT.md). Use isotonic on values, and with 3+ platforms compare each against the cross-platform **median** rather than pairwise, so deviation localizes to the true outlier instead of being split across both members of a rank inversion.
-4. **Weight by confidence.** FantasyPros' `rank_std` (§0.5, across 73 experts) is your dispersion measure. High std → wider error bars. Report a gap as significant only when it clears the noise.
+   > ⚠️ **Do not use rank/quantile normalization (`PERCENT_RANK`) for this** — still true regardless of which correction method is used. It's purely ordinal: when two platforms agree on ordering, every gap collapses to zero even where magnitudes differ by half a round — erasing exactly the arbitrage you're looking for. Demonstrated in [STACK-TYPESCRIPT.md §2](./STACK-TYPESCRIPT.md).
+4. **Weight by confidence.** Originally planned around FantasyPros' `rank_std` (§0.5, across 73 experts) — gone along with FantasyPros. What shipped instead measures a different, still-useful thing: how far ESPN's and Sleeper's own point *projections* disagree for a player, not expert-panel dispersion. See `metrics/confidence.ts`'s `modelAgreement` and `values`' `espn_pts`/`sleeper_pts` columns, which show the disagreement directly rather than collapsing it into a single "confidence" score — a choice made after an earlier version of that score itself caused confusion (a wide model spread on an elite player read as a bust warning, which was backwards).
 5. **Distinguish two kinds of disagreement:** *cross-platform* gap (arbitrage) vs. *within-source* dispersion (genuine uncertainty — committee backfield, injury question). Different meanings, don't merge them.
 
 ### Value & bust metrics
@@ -242,9 +246,9 @@ You cannot subtract ESPN ADP from Sleeper ADP and call the result signal. Five c
 
 ## 3. Entity resolution — ✅ solved
 
-Full method and measurements: **[CROSSWALK.md](./CROSSWALK.md)**. Implementation: [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) (TypeScript-ready, ~120 lines).
+Full method and measurements: **[CROSSWALK.md](./CROSSWALK.md)**. Implementation: [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) (TypeScript-ready, ~120 lines), later ported to `src/resolve/crosswalk.ts` — same mechanism, now resolving ESPN/Sleeper/Yahoo instead of the original ESPN/beatadp/FantasyPros.
 
-Measured against live data: **beatadp 100.0% · FantasyPros 99.8% · ESPN 99.4%** — 3 unresolved out of 1,195 rows, from a 44% baseline.
+Measured against live data at the time: **beatadp 100.0% · FantasyPros 99.8% · ESPN 99.4%** — 3 unresolved out of 1,195 rows, from a 44% baseline. (Historical numbers — see CROSSWALK.md for why the mechanism transfers regardless of which sources feed it.)
 
 Tiered resolution against Sleeper as canonical spine: team abbreviation (defenses) → deterministic `espn_id` → exact normalized name + position → Jaro-Winkler ≥ 0.92 blocked by position. Notably **`fuzzy` fires zero times** once names are normalized — it's a safety net, not a load-bearing step.
 
@@ -286,20 +290,23 @@ Python's genuine advantage here is scipy/sklearn. In practice this pipeline need
 
 ### 4.2 Project structure
 
+The planned layout below assumed a Next.js API + React UI and a `tools/` tool-calling layer (§5) — neither was built; §5 was tried and dropped in favor of staying CLI-only. What actually shipped, for reference (see [README.md — Layout](./README.md#layout) for the maintained version):
+
 ```
 fantasy-adp/
   src/
-    ingest/     espn.ts  beatadp.ts  fantasypros.ts  sleeper.ts
-    schema/     *.zod.ts                              # boundary validation
-    resolve/    crosswalk.ts  aliases.ts              # from crosswalk-resolver.mjs
-    metrics/    isotonic.ts  vorp.ts  tiers.ts  arbitrage.ts
-    tools/      definitions.ts  handlers.ts           # Claude tool-calling
+    ingest/     espn.ts  sleeper.ts  sleeper-projections.ts  yahoo.ts
+    resolve/    crosswalk.ts  normalize.ts             # from crosswalk-resolver.mjs
+    metrics/    confidence.ts  league-config.ts  projections.ts
+                replacement.ts  rounds.ts  tiers.ts  vorp.ts
+    lib/        http.ts  bronze.ts  assert.ts  render.ts
     db/         schema.sql  client.ts
-  app/          api/chat/route.ts  page.tsx           # Next.js
-  scripts/      daily-ingest.ts
+    scripts/    daily-ingest.ts  report.ts  tiers.ts  values.ts
   data/         bronze/ silver/ gold/
-  .github/workflows/ingest.yml
+  .github/workflows/  ingest.yml  ci.yml
 ```
+
+No `app/`, no `schema/*.zod.ts` directory (validation lives inline in each ingest module instead), no `tools/`. Zod is still used (§4), just not for tool-calling schemas — there's no tool-calling layer to define them for.
 
 **Runtime note:** use Node, not Bun. `@duckdb/node-api` ships native bindings and Bun's node-api compatibility is the kind of thing that costs an evening. Use `tsx` to run TS scripts directly.
 
@@ -341,7 +348,9 @@ Idempotency key: `(source, adp_format, capture_date)`. Re-running a day's ingest
 
 ---
 
-## 5. The natural-language layer
+## 5. The natural-language layer — tried, dropped
+
+> **Not built, and no longer planned.** A CLI-based query interface (`values`/`tiers`/`report`) turned out to answer the same questions this section designs for, without a chat layer on top. The design below is kept for the reasoning — the tool-boundary argument in particular is a decision worth remembering even outside this project — but nothing past this point describes the current system. See [README.md — Status](./README.md#status).
 
 **Do not use text-to-SQL.** Use **tool calling over typed functions**, with all math in TypeScript/SQL:
 
@@ -391,17 +400,15 @@ Claude parses *"Find me value QBs in the late rounds"* → `value_vs_projection(
 
 **Phase 0 — Spike.** ✅ **Done — see §0.** All three sources verified working, no external approvals outstanding.
 
-**Phase 1 — Ingestion + storage (2–3 days).** ESPN direct API (PPR via `leaguedefaults/3`), beatadp RSC parse (Sleeper + FantasyPros), Sleeper player dump for the canonical roster. Bronze writes, daily cron, retry/backoff, schema validation. **Ship this before analysis** so ADP history starts accumulating during draft season.
+**Phase 1 — Ingestion + storage.** ✅ **Done, though not as planned.** beatadp (RSC parse) and FantasyPros both shipped, then both broke in production and were replaced by Yahoo's own API. ESPN direct API and Sleeper's player dump held up as designed. Bronze writes, daily cron, retry/backoff, schema validation — all in place; see [README.md — Automation](./README.md#automation).
 
-**Phase 2 — Entity resolution (½ day).** ✅ *Solved ahead of schedule — see [CROSSWALK.md](./CROSSWALK.md).* Remaining work is porting [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) into the pipeline, adding the overrides file, and wiring the CI coverage gate. Was budgeted 2–3 days as a top schedule risk; that risk is retired.
+**Phase 2 — Entity resolution.** ✅ *Solved ahead of schedule — see [CROSSWALK.md](./CROSSWALK.md).* [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) was ported into the pipeline as `src/resolve/crosswalk.ts`, and the CI coverage gate (unresolved top-200 fails the ingest) is live in `daily-ingest.ts`. Was budgeted 2–3 days as a top schedule risk; that risk was retired, and stayed retired through a full source swap.
 
-**Phase 3 — Normalization + metrics (3–4 days).** Format-aware round conversion, quantile normalization, VORP, tiers, arbitrage gaps with confidence intervals. Gold tables.
+**Phase 3 — Normalization + metrics.** ✅ **Done, by a simpler route than planned.** Format-aware round conversion, VORP, tiers, and arbitrage gaps all shipped. Population-drift correction shipped as leave-one-out median rather than the planned isotonic regression (§2, point 3) — simpler, and sufficient with 3 real ADP sources. "Confidence intervals" shipped as direct per-source number comparison (§2, point 4) rather than a computed interval, after an earlier attempt at a single confidence *score* proved actively misleading.
 
-**Phase 4 — Query API + NL layer (2–3 days).** Next.js route handlers, Zod-derived tool definitions, Claude tool-calling loop, jargon glossary, React chat UI.
+**Phase 4 — Query API + NL layer.** ❌ **Dropped.** Tried, then deliberately abandoned in favor of the CLI (§5's banner has the reasoning). No Next.js, no chat UI, no tool-calling loop.
 
-**Phase 5 — Stretch (ongoing).** ADP trend/momentum charts off the snapshot history ("who's rising"), injury-news correlation, draft-day live assistant, auction-value mode using ESPN's `auctionValue`.
-
-**Realistic total to a working v1: ~1.5 weeks of focused evenings.** With Phase 2 retired, **Phase 3 is the only remaining schedule risk.**
+**Phase 5 — Stretch (ongoing).** ADP trend/momentum charts off the snapshot history ("who's rising") and auction-value mode remain unbuilt but are the more plausible next steps than reviving Phase 4 — the history to support "who's rising" has been accumulating since day one and is sitting in `data/silver/adp_snapshots.parquet` right now.
 
 ---
 
@@ -409,25 +416,25 @@ Claude parses *"Find me value QBs in the late rounds"* → `value_vs_projection(
 
 | Risk | Severity | Mitigation |
 |---|---|---|
-| **beatadp is a scrape, not an API** | **High** — it's now your only Sleeper source | No `/api/` route; you parse the RSC payload, which breaks on any Next.js redeploy. Keep bronze HTML; contract-test the parse daily; alert loudly on row-count drop. Document the draft-crawl fallback (below) without building it. |
+| ~~**beatadp is a scrape, not an API**~~ | ~~High~~ → **materialized, then retired** | ✅ **This happened.** beatadp redeployed and the RSC parse broke in production — exactly the predicted failure. The speculative draft-crawl fallback below was never built and turned out not to be needed: Sleeper ADP moved to Sleeper's own projections endpoint directly, and the FantasyPros half of beatadp's job moved to Yahoo's API. Both replacements are real APIs, not scrapes, so this entire risk category is gone rather than mitigated. |
 
-**Fallback if beatadp breaks.** Compute Sleeper ADP yourself from `/v1/draft/{id}/picks`. Sleeper's published limit of 1000 calls/min is generous enough that the *volume* was never the obstacle — the obstacle is **discovering draft IDs**, since there's no public draft directory. You'd walk `user → /v1/user/{id}/leagues/nfl/{season} → /v1/league/{id}/drafts → picks`, which means seeding user IDs at scale. Viable for a small known cohort; unlikely to be market-representative. Keep it as a documented escape hatch, not a plan.
-| ~~ID crosswalk only 44%~~ | ~~High~~ → **Low** | ✅ **Solved** — tiered resolver hits 99.4–100% ([CROSSWALK.md](./CROSSWALK.md)). Residual risk is only maintenance: keep the alias file current and hold the CI gate on top-200 coverage. |
-| **Mixing rank with ADP** | High | Already caught once (§0.3). Assert on ingest that any column claiming to be ADP is ≥80% non-integer; fail the run if not |
+**Fallback if beatadp breaks — historical, not implemented.** Left here as-written for the record; it wasn't how the actual break was handled. The idea was computing Sleeper ADP from `/v1/draft/{id}/picks`, but discovering draft IDs at scale (no public directory) made it a poor fit for a market-representative sample. What actually happened was simpler: Sleeper's projections endpoint turned out to carry ADP too, which is why it stopped needing beatadp at all rather than needing a fallback for it.
+| ~~ID crosswalk only 44%~~ | ~~High~~ → **Low** | ✅ **Solved** — tiered resolver hits 99.4–100% ([CROSSWALK.md](./CROSSWALK.md)). Residual risk is only maintenance: keep the alias file current and hold the CI gate on top-200 coverage. Held up across the beatadp/FantasyPros → Yahoo swap without changes to the resolver itself. |
+| **Mixing rank with ADP** | High | Caught three times now, not once — beatadp's ESPN column (§0.3), ESPN's `SUPERFLEX` rank type, and (2026-08-14, in production) Sleeper's own coverage expansion dragging the whole-series non-integer ratio down as legitimately-thin deep-bench ADP piled up. That third one is why the assertion is scoped to the **top 300 by draft position**, not the whole series — see `lib/assert.ts`. Still ≥80% non-integer as the threshold. |
 | **ESPN endpoints undocumented** | Medium | They already moved once (`leagues/0` → `leaguedefaults`). Keep bronze; contract-test daily; alert on schema drift |
-| **Population bias faked as signal** | Medium | Isotonic normalization before differencing (§2.3) — otherwise every ESPN player looks like an arbitrage |
-| **Format coverage is uneven** | Medium | beatadp is **PPR/1QB only** (params ignored) and ESPN's ADP is one global series regardless of `leaguedefaults`. Mitigate by splitting ADP-dependent from config-derived features ([FORMATS.md §2](./FORMATS.md)) — arbitrage stays PPR/1QB, VORP/tiers/strategy work for any config |
-| **Rank leaking into an ADP column** | Medium | Already caught twice — beatadp's ESPN column (§0.3) and ESPN's `SUPERFLEX` rank type. Enforce the ≥80%-non-integer assertion on every ADP field, and keep `ecr_snapshots` separate from `adp_snapshots` |
+| **Population bias faked as signal** | Medium | Shipped as leave-one-out median rather than the isotonic normalization planned here (§2, point 3) — otherwise every ESPN player looks like an arbitrage |
+| **Format coverage is uneven** | Medium | Sleeper and Yahoo are both **PPR/1QB only**; ESPN's ADP is one global series regardless of `leaguedefaults`. Mitigate by splitting ADP-dependent from config-derived features ([FORMATS.md §2](./FORMATS.md)) — arbitrage stays PPR/1QB, VORP/tiers/strategy work for any config |
+| **Rank leaking into an ADP column** | Medium | Caught repeatedly — see the "Mixing rank with ADP" row above, same underlying guard. `ecr_snapshots` is now a frozen archive (nothing writes to it since FantasyPros was dropped) rather than a live table to keep separate from `adp_snapshots`, but the separation itself is still in the schema. |
 | **Rookies break matching in August** | Medium | CI assertion on top-200 coverage; run daily during draft season |
 
-**Terms of service:** ESPN's fantasy API is undocumented and unofficial. beatadp is a third-party site with no published API — scraping it is a courtesy you should not abuse. **One request per day, identify your user-agent, cache aggressively, never hammer.** All of this is fine for a personal tool; redistributing or commercializing any of it is a different conversation — revisit licensing before any launch.
+**Terms of service:** ESPN's and Yahoo's fantasy APIs are both undocumented and unofficial. **One request per day, identify your user-agent, cache aggressively, never hammer.** All of this is fine for a personal tool; redistributing or commercializing any of it is a different conversation — revisit licensing before any launch.
 
 ---
 
-## 8. Immediate next steps
+## 8. Immediate next steps — all done, kept for the record
 
-1. Scaffold the repo + write the two ingesters (ESPN direct, beatadp RSC parse).
-2. Wire the ingest-time assertion that rejects a rank series masquerading as ADP (§0.3).
-3. **Get the daily cron running this week** — every day without a snapshot is draft-season ADP history permanently lost, and it cannot be backfilled.
+1. ~~Scaffold the repo + write the two ingesters (ESPN direct, beatadp RSC parse).~~ Done — and the beatadp half was later replaced (see §7).
+2. ~~Wire the ingest-time assertion that rejects a rank series masquerading as ADP (§0.3).~~ Done, and since refined to scope the check to the top 300 by draft position (§7).
+3. ~~**Get the daily cron running this week.**~~ Running since 2026-07-27, with one real gap: 2026-08-14, when a false-positive from the assertion above (before it was scoped to top 300) failed a run that had genuinely healthy data. Everything else has been captured. See [README.md — Automation](./README.md#automation) for what the pipeline does now, including the failure-notification and history-loss guards added after that incident.
 
-No external approvals are outstanding. Node 24 is already installed (see [STACK-TYPESCRIPT.md](./STACK-TYPESCRIPT.md)).
+For what to actually work on next, this list is no longer it — see [README.md](./README.md) and the open items there.
