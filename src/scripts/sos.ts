@@ -100,6 +100,17 @@ function shiftLabel(delta: number): string {
  * is actually choosing between, and letting schedule pick the pool would
  * surface deep bench players whose easy schedule nobody will ever use.
  *
+ * Shared by the summary and the full table so the two can never disagree about
+ * who is in scope: a player in the summary who is missing from the table below
+ * it would read as a bug even if both were individually defensible.
+ */
+const pool = (pos: string) =>
+  sos
+    .filter((r) => r.pos === pos && adpByPlayer.has(r.playerId))
+    .sort((a, b) => adpByPlayer.get(a.playerId)! - adpByPlayer.get(b.playerId)!)
+    .slice(0, TOP_N);
+
+/**
  * Display order is by playoff schedule, easiest first — deliberately NOT the
  * alphabetical order the value board and arbitrage table use. Those went
  * alphabetical because nothing visible justified their row order, so
@@ -112,10 +123,7 @@ function shiftLabel(delta: number): string {
  * than as 24 independent readings.
  */
 const board = (pos: string) =>
-  sos
-    .filter((r) => r.pos === pos && adpByPlayer.has(r.playerId))
-    .sort((a, b) => adpByPlayer.get(a.playerId)! - adpByPlayer.get(b.playerId)!)
-    .slice(0, TOP_N)
+  pool(pos)
     .sort((a, b) => b.postIdx - a.postIdx)
     .map((r) => ({
       player: r.player,
@@ -134,6 +142,43 @@ const board = (pos: string) =>
       'playoff shift': shiftLabel(r.postIdx - r.regIdx),
     }));
 
+const SUMMARY_N = 5;
+
+/**
+ * One row per position: the five easiest playoff schedules, each named by the
+ * most-drafted player who has it.
+ *
+ * Deduplicated by team, which is the whole reason this isn't just the top five
+ * rows of the table below. SOS is a team property, so an undeduplicated top
+ * five at WR spends two of its slots on Chase and Higgins describing one
+ * Bengals schedule — a summary that reports four distinct facts in five slots.
+ * Grouping first and taking the lowest-ADP player on each team gives five real
+ * schedules, each labelled by the player a drafter is most likely to be
+ * weighing.
+ *
+ * Playoffs only. The regular-season ordering is in the full table, and over
+ * fourteen games the whole league converges close enough to average that a
+ * "top five" there is mostly noise — which is exactly the magnitude caveat
+ * this file already carries.
+ */
+const summaryRow = (pos: string) => {
+  // pool() is ADP-ascending, so the first player seen for a team is its
+  // most-drafted one.
+  const byTeam = new Map<string, ReturnType<typeof pool>[number]>();
+  for (const r of pool(pos)) if (!byTeam.has(r.team)) byTeam.set(r.team, r);
+
+  const top = [...byTeam.values()]
+    .sort((a, b) => b.postIdx - a.postIdx)
+    .slice(0, SUMMARY_N);
+
+  const headers = ['1st', '2nd', '3rd', '4th', '5th'];
+  const row: Record<string, string> = { pos };
+  // Every position gets all five keys, blank if short, so the union-of-keys
+  // header in render.ts stays stable instead of shifting per row.
+  headers.forEach((h, i) => { row[h] = top[i] ? `${top[i]!.player} (${top[i]!.team})` : '—'; });
+  return row;
+};
+
 const col = (name: string) => (MARKDOWN ? `\`${name}\`` : name);
 const legend =
   `${col('weeks 1-14')} is the fantasy regular season and ${col('weeks 15-17')} the ` +
@@ -151,13 +196,26 @@ const basisNote =
   `schedule. Personnel turns over, so treat this as a tiebreaker between similar players, ` +
   `not a reason to move anyone across tiers.`;
 
+const shown = POSITIONS.filter((pos) => !posFilter || pos === posFilter);
+
+// A skim view above the detail. sos:md writes 96 rows into REPORT.md, which is
+// the right amount to have and the wrong amount to open a section with.
+const summaryNote =
+  `Easiest ${SUMMARY_N} playoff schedules (weeks 15-17) at each position, one player per ` +
+  `team — teammates share a schedule, so the most-drafted player stands in for his. ` +
+  `Full boards below.`;
+
 if (MARKDOWN) {
   heading('Strength of schedule');
   note(`${season} season, ${DEFAULT_CONFIG.scoring} scoring. ${basisNote}`);
   note(legend);
   note(gradeNote);
-  for (const pos of POSITIONS) {
-    if (posFilter && pos !== posFilter) continue;
+
+  heading('Easiest playoff schedules', 3);
+  note(summaryNote);
+  table(shown.map(summaryRow));
+
+  for (const pos of shown) {
     heading(pos, 3);
     table(board(pos));
   }
@@ -166,8 +224,12 @@ if (MARKDOWN) {
   console.log(`${legend}\n`);
   console.log(`${gradeNote}\n`);
   console.log(`(${basisNote})\n`);
-  for (const pos of POSITIONS) {
-    if (posFilter && pos !== posFilter) continue;
+
+  console.log(`${summaryNote}\n`);
+  table(shown.map(summaryRow));
+  console.log('');
+
+  for (const pos of shown) {
     console.log(`${pos}:`);
     table(board(pos));
   }

@@ -57,7 +57,19 @@ Tier 2  (adp 41-47, 205–211 pts, 2 players)
 
 Tier count scales to the draftable pool automatically — it's not a settable knob, because forcing a small tier count silently produces tiers that span 100+ points and stop meaning anything.
 
-**`npm run sos [POS]`** — the 24 most-drafted players at a position, with how hard their schedule is in the fantasy regular season versus the fantasy playoffs:
+**`npm run sos [POS]`** — opens with the five easiest playoff schedules at each position, then the 24 most-drafted players at a position with how hard their schedule is in the fantasy regular season versus the fantasy playoffs:
+
+```
+┌─────────┬──────┬────────────────────────┬─────────────────────────┬───────────────────────┐
+│ (index) │ pos  │ 1st                    │ 2nd                     │ 3rd                   │
+├─────────┼──────┼────────────────────────┼─────────────────────────┼───────────────────────┤
+│ 1       │ 'RB' │ 'Jeremiyah Love (ARI)' │ 'Jonathan Taylor (IND)' │ 'Travis Etienne (NO)' │
+│ 2       │ 'WR' │ 'Malik Nabers (NYG)'   │ 'Justin Jefferson (MIN)'│ "Ja'Marr Chase (CIN)" │
+└─────────┴──────┴────────────────────────┴─────────────────────────┴───────────────────────┘
+```
+
+That summary is deduplicated by team, one player per schedule. Teammates share a schedule, so an undeduplicated top five at WR would spend two slots on Chase and Higgins describing the same Bengals draw — four facts in five slots. The most-drafted player on each team stands in for it.
+
 
 ```
 RB:
