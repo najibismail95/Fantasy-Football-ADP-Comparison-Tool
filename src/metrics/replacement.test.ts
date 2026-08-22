@@ -124,6 +124,47 @@ describe('computeVorp + computeValueScore', () => {
     assert.equal(c1.valueScore, 0, 'correctly priced at #1 — nothing to be over or under, regardless of the talent gap to p2');
   });
 
+  test('swapping ranks 1 and 2 at a position is forced to zero for BOTH players, not just the exact match', () => {
+    // Regression (Puka Nacua/Ja'Marr Chase, Brock Bowers/Trey McBride,
+    // 2026-08-21): drafted WR2/produces WR1 showed +29, drafted WR1/produces
+    // WR2 showed +9 — the same two players "beating" each other on value for
+    // swapping one spot at the very top, where the market has already
+    // correctly identified both as elite and there is no cheaper slot either
+    // of them could have gone in. top1 and top2 below are the same shape.
+    const results = computeValueScore([
+      { playerId: 'top1', pos: 'WR', vorp: 200, adp: 2 }, // drafted 2nd, produces best
+      { playerId: 'top2', pos: 'WR', vorp: 190, adp: 1 }, // drafted 1st, produces 2nd-best
+      { playerId: 'p3', pos: 'WR', vorp: 120, adp: 30 },
+      { playerId: 'p4', pos: 'WR', vorp: 100, adp: 40 },
+    ]);
+    const top1 = results.find((r) => r.playerId === 'top1')!;
+    const top2 = results.find((r) => r.playerId === 'top2')!;
+    assert.equal(top1.adpRank, 2);
+    assert.equal(top1.vorpRank, 1);
+    assert.equal(top1.valueScore, 0, 'drafted 2nd but produces 1st — still zero, no rank 0 to be cheaper than');
+    assert.equal(top2.adpRank, 1);
+    assert.equal(top2.vorpRank, 2);
+    assert.equal(top2.valueScore, 0, 'drafted 1st but produces 2nd — still zero, the market already has him at the top');
+  });
+
+  test('the top-2 rule does not swallow a legitimate 3rd-pick value (Derrick Henry stays 160)', () => {
+    // The top-2 fix must be scoped tightly: rank 3 is explicitly excluded,
+    // because a real 3rd-pick-produces-1st edge (see the dedicated Henry test
+    // below) is exactly the signal computeValueScore exists to surface, and
+    // must not be collapsed into the same bucket as the rank-1/2 noise above.
+    const results = computeValueScore([
+      { playerId: 'henry', pos: 'RB', vorp: 240, adp: 30 }, // drafted 3rd, produces best
+      { playerId: 'e2', pos: 'RB', vorp: 220, adp: 12 },
+      { playerId: 'e3', pos: 'RB', vorp: 200, adp: 20 },
+      { playerId: 'p4', pos: 'RB', vorp: 50, adp: 40 },
+      { playerId: 'p5', pos: 'RB', vorp: 40, adp: 50 },
+    ]);
+    const henry = results.find((r) => r.playerId === 'henry')!;
+    assert.equal(henry.adpRank, 3);
+    assert.equal(henry.vorpRank, 1);
+    assert.ok(henry.valueScore > 0, 'adpRank 3 is outside the top-2 bypass, so this must still be computed, not zeroed');
+  });
+
   test('one severe outlier neighbor does not define the whole comparison', () => {
     // Regression for the actual production bug (Bryce Young, 2026-08-18): the
     // ORIGINAL single-neighbor version compared a player only against whoever

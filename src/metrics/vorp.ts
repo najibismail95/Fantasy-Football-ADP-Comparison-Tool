@@ -101,17 +101,33 @@ const median = (nums: readonly number[]): number => {
  * cases (adpRank and vorpRank one apart), pulling the comparison slightly
  * toward his own number rather than purely his neighbors'.
  *
- * Known residual: within 1 rank of a position's very top or bottom, the
- * window can only extend one direction (no rank 0 exists), which can pull the
- * comparison across a real tier boundary and flip the expected sign for a
- * player barely off an exact match — e.g. the WR1 by ADP who is actually the
- * 2nd-best producer can still show a small POSITIVE score if the 3rd- and
- * 4th-best producers are notably worse, since the median lands below his own
- * number despite someone else outproducing him. Measured: 4 of 223 players
- * (2026-08-19 data), all within 1 rank of an edge, all under 14 points —
- * nothing like the 38-point distortion this was built to fix. Documented
- * rather than chased further.
+ * Both ADP rank and production rank in the TOP 2 at the position also forces
+ * valueScore to 0, the same bypass as an exact match and for the same root
+ * cause: at rank 1 there is no rank 0 to compare down from, so any window
+ * touching rank 1 or 2 is structurally short on "better" neighbors and long
+ * on "worse" ones, and its median comes out lower than a fair symmetric
+ * comparison would — inflating a fake edge purely from being near the top,
+ * not from any real mispricing. Regression (2026-08-21): Puka Nacua (drafted
+ * WR2, produces WR1) showed +29 and Ja'Marr Chase (drafted WR1, produces WR2)
+ * showed +9 — the SAME pair, both flagged as "value" against each other, for
+ * doing nothing but swapping 1 spot at the very top; Brock Bowers/Trey
+ * McBride showed the identical pattern at TE (+37/+14). This was flagged
+ * before rollout as a "known residual" and measured small (≤14 points on
+ * 2026-08-19's data) — it grew past that on a later day's projections, large
+ * enough to read as a real signal instead of noise, so it needed an actual
+ * fix rather than continued documentation. The threshold is deliberately
+ * tight (top 2, not top 3+): Derrick Henry drafted RB3/producing RB1 is a
+ * real, legitimate 2-spot edge worth ~160 points (see the regression test
+ * below) and must NOT be zeroed by this rule — the top-2 case is narrower
+ * than "near the top" in general, scoped to exactly the ranks where there is
+ * no possible "cheaper" comparison point at all, not merely a small one.
  */
+// Ranks at or above this, on BOTH axes, have no possible "cheaper" neighbor
+// to compare against at all (see the top-2 paragraph above) — not a tunable
+// sensitivity knob, a description of where the window's comparison point
+// stops existing.
+const TOP_OF_POSITION = 2;
+
 export function computeValueScore(
   players: readonly ValueInput[],
   { windowRadius = 3 } = {},
@@ -135,7 +151,7 @@ export function computeValueScore(
       const vr = vorpRank.get(p.playerId)!;
       const ar = adpRank.get(p.playerId)!;
       let valueScore: number;
-      if (ar === vr) {
+      if (ar === vr || (ar <= TOP_OF_POSITION && vr <= TOP_OF_POSITION)) {
         valueScore = 0;
       } else {
         // Window of production ranks centered on his ADP rank (ar-1 in the
