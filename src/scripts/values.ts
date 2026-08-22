@@ -1,7 +1,7 @@
 import { openDb } from '../db/client.js';
 import { DEFAULT_CONFIG, type LeagueConfig } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
-import { computeVorp, computeValueScore } from '../metrics/vorp.js';
+import { computeVorp, computeValueScore, gradeValueScores } from '../metrics/vorp.js';
 import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
 import { roundOf, roundNumber } from '../metrics/rounds.js';
@@ -56,6 +56,19 @@ const projRows: ProjectedPlayer[] = blended.map((b) => ({
   pos: posByPlayer.get(b.playerId) as ProjectedPlayer['pos'],
   points: b.points,
 }));
+// Kept for the value board's own 2-source guard below (see valueInput) — a
+// player missing from ESPN entirely (dropped, or never added) gets a
+// "blended" number that's really just Sleeper's alone, unconfirmed by a
+// second source. Found on Jayden Higgins: ESPN had no projection or ADP for
+// him at all (season-ending injury, PLAN.md's population-drift risk in
+// miniature — one source updates, the other hasn't caught up), so his
+// "value" was really just Sleeper's stale pre-injury number riding
+// unchecked. replacementLevels/computeVorp above still use the FULL pool
+// including single-source players — replacement level is a league-wide
+// baseline and narrowing that pool would shift it for everyone else; the
+// guard belongs on the value board specifically, the thing that puts a
+// player in front of a drafter as a recommendation.
+const sourcesByPlayer = new Map(blended.map((b) => [b.playerId, b.sources]));
 // Shown as their own columns below rather than folded into edge_pts, so a
 // player where the two disagree (e.g. Tyjae Spears: ESPN 154 / Sleeper 115)
 // is visible directly instead of behind a flag on the blended number.
@@ -103,8 +116,11 @@ const droppedForThinData = rawAdp.length
   : 0;
 const adpByPlayer = new Map(consensus.map((r) => [r.playerId, r.adp]));
 
+const droppedForThinProjections = vorpRows.filter(
+  (v) => adpByPlayer.has(v.playerId) && (sourcesByPlayer.get(v.playerId) ?? 0) < 2,
+).length;
 const valueInput = vorpRows
-  .filter((v) => adpByPlayer.has(v.playerId))
+  .filter((v) => adpByPlayer.has(v.playerId) && (sourcesByPlayer.get(v.playerId) ?? 0) >= 2)
   .map((v) => ({ playerId: v.playerId, pos: v.pos, vorp: v.vorp, adp: adpByPlayer.get(v.playerId)! }));
 
 // Ranked on the FULL position pool, before any round-range filter. adpRank
@@ -112,7 +128,10 @@ const valueInput = vorpRows
 // happen to query — ranking an already-cherry-picked top-15 would make
 // everyone look average purely because they're being compared only to other
 // good values.
-const values = computeValueScore(valueInput);
+// Graded here, over the FULL position pool, for the same reason valueScore
+// itself is ranked pre-filter (see comment above): a player's A/B/C/D/F has
+// to mean the same thing regardless of what round range you happen to query.
+const values = gradeValueScores(computeValueScore(valueInput));
 
 const nameByPlayer = new Map(
   ((await q(`SELECT player_id AS "playerId", display_name AS name FROM players`)) as {
@@ -121,7 +140,10 @@ const nameByPlayer = new Map(
   }[]).map((r) => [r.playerId, r.name]),
 );
 
-const TOP_N = 15;
+// Safety valve only, not the normal path: a huge round range with a genuinely
+// deep position could in principle grade a lot of players A/B. The grade
+// filter below is what actually decides the board's size in practice.
+const MAX_ROWS = 20;
 
 /**
  * Positions listed when rendering the whole board for the daily report. K and
@@ -140,8 +162,15 @@ const board = (pos?: string) =>
       const rd = roundNumber(v.adp, cfg.teams);
       return rd >= roundMin && rd <= roundMax;
     })
+    // Graded, not force-capped: only players whose valueScore is a real
+    // outlier WITHIN THEIR OWN POSITION (top ~30%, curved — see grade.ts) make
+    // the board at all. Early rounds legitimately return few or zero rows,
+    // because ADP and production already agree closely at the top of a
+    // position — there is no real value to find there, and a flat top-15 used
+    // to paper over that by relisting the consensus order every time.
+    .filter((r) => r.grade === 'A' || r.grade === 'B')
     .sort((a, b) => b.valueScore - a.valueScore)
-    .slice(0, TOP_N)
+    .slice(0, MAX_ROWS)
     .map((r) => ({
       player: nameByPlayer.get(r.playerId) ?? r.playerId,
       pos: r.pos,
@@ -149,20 +178,14 @@ const board = (pos?: string) =>
       round: Number(roundOf(r.adp, cfg.teams).toFixed(1)),
       drafted_as: `${r.pos}${r.adpRank}`,
       produces_like: `${r.pos}${r.vorpRank}`,
+      grade: r.grade,
       espn_pts: rawPtsByPlayer.get(r.playerId)?.ESPN?.toFixed(0) ?? '—',
       sleeper_pts: rawPtsByPlayer.get(r.playerId)?.SLEEPER?.toFixed(0) ?? '—',
-      // valueScore (formerly a printed edge_pts column) still drives the sort
-      // above and decides who makes this top-15 — just not printed as its own
-      // number. It survived one real bug (Bryce Young inflated by one outlier
-      // neighbor, see vorp.ts) and, once fixed, a second look decided a raw
-      // points differential between two sources doesn't need its own column
-      // when drafted_as/produces_like/espn_pts/sleeper_pts already show
-      // everything a reader needs to judge the pick themselves.
     }))
-    // Selection above is by value — that decides WHO makes this top-15.
-    // Display order is alphabetical by name, so the printed table reads as a
-    // browsable list rather than a ranking a reader might mistake for "best
-    // to worst" now that there's no visible score to justify the order.
+    // Selection above is by value — that decides WHO makes the board. Display
+    // order is alphabetical by name, so the printed table reads as a
+    // browsable list rather than a ranking, since there's no visible score on
+    // the row itself to justify a "best to worst" order.
     .sort((a, b) => a.player.localeCompare(b.player));
 
 // Column names are backticked in Markdown: they contain underscores, and bare
@@ -171,11 +194,20 @@ const board = (pos?: string) =>
 const col = (name: string) => (MARKDOWN ? `\`${name}\`` : name);
 const legend =
   `${col('espn_pts')}/${col('sleeper_pts')}: each source's own ${cfg.scoring} ` +
-  `projection, compare them yourself. Rows are sorted by projected production ` +
-  `relative to draft cost — biggest value first.`;
+  `projection, compare them yourself. ${col('drafted_as')}/${col('produces_like')} ` +
+  `are his rank by ADP vs. by production, per position — the gap between them ` +
+  `is the story. ${col('grade')} curves the underlying point edge within his ` +
+  `own position (A/B = top ~30%). Only A/B players make this board, listed ` +
+  `alphabetically — an empty or short section means there's no real ` +
+  `value in that range, not a bug.`;
 const thinDataNote =
   `${droppedForThinData} players excluded league-wide: fewer than 2 real ADP ` +
   `sources after removing values censored at a source's ceiling.`;
+const thinProjNote =
+  `${droppedForThinProjections} more excluded league-wide: fewer than 2 ` +
+  `projection sources, so "produces_like" would really just be one source's ` +
+  `unchecked number — often because a player was dropped from one source's ` +
+  `pool (e.g. a season-ending injury) while the other hasn't caught up yet.`;
 
 // One pass over the already-computed board per position, rather than four
 // separate invocations of this script — the expensive part (projections, VORP,
@@ -191,13 +223,15 @@ if (MARKDOWN && !posFilter) {
   );
   note(legend);
   if (droppedForThinData > 0) note(thinDataNote);
+  if (droppedForThinProjections > 0) note(thinProjNote);
   for (const pos of REPORT_POSITIONS) {
     heading(pos, 3);
     table(board(pos));
   }
 } else {
-  console.log(`\n${posFilter ?? 'ALL'} · rounds ${roundMin}-${roundMax} · sorted by value score:\n`);
+  console.log(`\n${posFilter ?? 'ALL'} · rounds ${roundMin}-${roundMax} · A/B value plays, alphabetical:\n`);
   console.log(`${legend}\n`);
   if (droppedForThinData > 0) console.log(`(${thinDataNote})\n`);
+  if (droppedForThinProjections > 0) console.log(`(${thinProjNote})\n`);
   table(board(posFilter));
 }
