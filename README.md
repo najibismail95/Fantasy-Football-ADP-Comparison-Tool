@@ -11,6 +11,7 @@ npm run report      # sanity checks + cross-platform arbitrage
 npm run values RB 6 10   # value board: position + round range
 npm run tiers TE          # ADP-clustered tiers with cliffs
 npm run sos RB            # strength of schedule: regular season vs playoffs
+npm run rising RB 14      # who's rising/falling: ADP movement over N days
 ```
 
 `npm run ingest:dry` fetches and resolves without writing to the database — good for checking a source hasn't broken before it touches anything.
@@ -91,6 +92,24 @@ Each cell is a grade curved against all 32 teams (A = easiest ~10%, F = hardest 
 
 The ratings price the 2026 schedule using **2025** defensive results, because in August no 2026 defensive snap has happened. That is the method every public SOS table uses, and computing it independently from raw play-by-play reproduced Yahoo's published 2026 WR playoff numbers to about a point (CLE 114.7 vs their 114.4). It is still last year's defenses — personnel turns over hard — so it belongs in a tiebreak between similar players, not in a decision to move someone across tiers.
 
+**`npm run rising [POS] [DAYS]`** — who's rising and falling, in ADP, over the last `DAYS` (default 7):
+
+```
+ALL · last 7 days (as of 2026-08-24):
+
+Rising:
+┌─────────┬──────────────────────┬──────┬───────────┬──────────┬──────────────┬─────────────┬────────────┬───────────┐
+│ (index) │ player                │ pos  │ espn_then │ espn_now │ sleeper_then │ sleeper_now │ yahoo_then │ yahoo_now │
+├─────────┼──────────────────────┼──────┼───────────┼──────────┼──────────────┼─────────────┼────────────┼───────────┤
+│ 0       │ "De'Zhaun Stribling"  │ 'WR' │ 165.9     │ 155      │ 175.7        │ 155.2       │ 127.7      │ 120.2     │
+│ 1       │ 'Jonathon Brooks'     │ 'RB' │ 129       │ 120.7    │ 128.5        │ 113.8       │ 103.4      │ 98.9      │
+└─────────┴──────────────────────┴──────┴───────────┴──────────┴──────────────┴─────────────┴────────────┴───────────┘
+```
+
+`*_then`/`*_now` are each source's own ADP, averaged over the last few available days around each endpoint rather than a single day's snapshot — smoothing out the kind of day-to-day sampling noise a single mock draft or two can cause. A lower number now than then means rising; higher means falling. Every source is diffed against **itself** across two dates, never against a different source — that's deliberate, not a missing feature. PLAN.md's confound list for cross-platform ADP diffs (scoring, league size, roster construction, population sharpness, recency) is a list of ways two *different* platforms aren't measuring the same thing; none of it applies when a source is compared to its own number from a week ago.
+
+A player needs **ESPN plus at least one other source** with real data to appear at all — a single source moving alone, with nobody else to check it against, isn't shown no matter how big that move looks, and ESPN specifically has to be one of the sources backing it (it's the one source with a genuinely continuous, stable history; Sleeper's pool has grown sharply over the preseason and Yahoo's history is still short, so either one moving *alone* is a weaker signal than either one confirming ESPN). Rows are sorted so players whose sources actually agree on direction rank above ones where only a single source backs the move — a real disagreement between two tracked sources is still shown, not hidden, just ranked lower. `—` means a source has no valid data for that player over the window — either it doesn't cover him, was censored out, or (Yahoo specifically) the window reaches further back than its history goes; run a shorter window (e.g. `npm run rising RB 3`) and Yahoo fills in. K/DEF are excluded — same reasoning `report`'s arbitrage table already uses, an ADP average built from a handful of barely-drafted picks swings for reasons that have nothing to do with the market.
+
 **`npm run report`** — cross-platform sanity checks and arbitrage:
 
 ```
@@ -148,7 +167,7 @@ Every run keeps its own copy, so you can read a specific day without digging thr
 
 > **Note:** GitHub only shows run summaries and logs to signed-in users. Any GitHub account works — it doesn't need to be yours, and the repo is public — but a logged-out visitor will just see "Sign in to view logs". If you want a link to send someone without an account, use `REPORT.md` above.
 
-Both routes come from `npm run report:md`, `npm run values:md`, and `npm run sos:md` — the same `report`, `values`, and `sos` you'd run locally, with Markdown tables instead of terminal box-drawing. Identical numbers, same code path.
+Both routes come from `npm run report:md`, `npm run rising:md`, `npm run values:md`, and `npm run sos:md`, run in that order — the same `report`, `rising`, `values`, and `sos` you'd run locally, with Markdown tables instead of terminal box-drawing. Identical numbers, same code path. `rising` runs directly after `report` so "who's rising" sits right under the cross-platform arbitrage table — both are ADP market-signal sections, so `report.ts` deliberately prints arbitrage as its last section rather than its usual middle position.
 
 ### When it breaks
 
@@ -162,10 +181,10 @@ The ingest is also guarded against overwriting good history with something worse
 src/
   ingest/     one module per source (espn, sleeper, sleeper-projections, yahoo, nflverse)
   resolve/    entity resolution (name normalization, aliases, crosswalk)
-  metrics/    replacement level, VORP, tiers, strength of schedule, projection blending, source-agreement checks
+  metrics/    replacement level, VORP, tiers, strength of schedule, ADP momentum, projection blending, source-agreement checks
   lib/        http + retry, bronze archival, ingest-time guards
   db/         DuckDB schema and client, including the history-loss guard
-  scripts/    daily-ingest, report, values, tiers, sos
+  scripts/    daily-ingest, report, values, tiers, sos, rising
 data/
   bronze/     raw payloads, gzipped, partitioned by source + date
   silver/     Parquet exports — the committed, append-only history

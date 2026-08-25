@@ -81,6 +81,11 @@ table(
   FROM player_xref_current GROUP BY 1,2 ORDER BY source, n DESC`),
 );
 
+// Arbitrage is deliberately the LAST section this script prints — the daily
+// workflow concatenates `rising:md` right after `report:md`, so whatever
+// prints last here is what "who's rising" ends up sitting directly under in
+// the assembled REPORT.md. Both are ADP-focused market-signal sections, so
+// that adjacency is the point, not an accident of file order.
 heading('Cross-platform arbitrage: leave-one-out median (PPR/1QB)');
 // Each source is compared against the MEDIAN OF THE OTHER SOURCES, not against
 // one other platform pairwise.
@@ -190,6 +195,3 @@ table(
  * picks, so it mostly reported "this player is a TE" rather than "this player
  * is mispriced".
  */
-
-heading('Unresolved players (surfaced, never dropped)');
-table(await q(`SELECT source, source_name, position FROM unresolved_current ORDER BY source_name`));

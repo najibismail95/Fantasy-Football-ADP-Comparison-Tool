@@ -15,9 +15,11 @@
     "values": "tsx src/scripts/values.ts",
     "tiers": "tsx src/scripts/tiers.ts",
     "sos": "tsx src/scripts/sos.ts",
+    "rising": "tsx src/scripts/rising.ts",
     "report:md": "tsx src/scripts/report.ts --markdown",
     "values:md": "tsx src/scripts/values.ts --markdown",
-    "sos:md": "tsx src/scripts/sos.ts --markdown"
+    "sos:md": "tsx src/scripts/sos.ts --markdown",
+    "rising:md": "tsx src/scripts/rising.ts --markdown"
   },
   "dependencies": {
     "@duckdb/node-api": "1.5.5-r.2",
