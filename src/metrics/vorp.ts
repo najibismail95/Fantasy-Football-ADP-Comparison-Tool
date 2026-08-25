@@ -1,5 +1,6 @@
 import type { ReplacementLevel } from './replacement.js';
 import { curveGrades, type Grade } from './grade.js';
+import { roundNumber } from './rounds.js';
 
 export type { Grade };
 
@@ -209,4 +210,66 @@ export function gradeValueScores(results: readonly ValueResult[]): GradedResult[
     arr.forEach((r, i) => out.push({ ...r, ...graded[i]! }));
   }
   return out;
+}
+
+/** The minimum a player must clear to be worth recommending as a value. */
+export type ValueBoardRules = {
+  /** Consensus ADP must be at or before this pick. */
+  draftableCutoff: number;
+  /** Inclusive round window, on the INTEGER round (see rounds.ts). */
+  roundMin: number;
+  roundMax: number;
+  /** League size, to convert ADP to a round. */
+  teams: number;
+};
+
+/**
+ * Whether a graded player belongs on the value board at all — the pure,
+ * testable core of values.ts's selection logic. Extracted here (rather than
+ * left inline in the script) after three separate regression-driven rules
+ * accumulated with zero test coverage; nothing would have caught a
+ * reintroduction of any of the bugs below.
+ *
+ * The four rules, and the real case each exists to prevent:
+ *
+ *  1. ABOVE REPLACEMENT (vorp > 0). valueScore is RELATIVE — it asks "does
+ *     he outproduce the typical player taken at his draft slot", which a
+ *     below-replacement player can do while still being worse than a free
+ *     waiver-wire add. Regression (2026-08-24): Kyle Monangai graded B on a
+ *     +5.0 valueScore with his own VORP at -18.8, and every RB in his
+ *     comparison window was ALSO below replacement — the score really said
+ *     "best of a bad neighborhood". Rico Dowdle (-10.6) had the same shape.
+ *     Structurally the neighborhood-level version of the weakness the top-2
+ *     rank-swap fix addressed at the single-outlier level (see
+ *     computeValueScore above).
+ *  2. DRAFTABLE DEPTH (adp <= draftableCutoff). Most real drafters spend the
+ *     last 2-3 rounds of a 16-round draft on K/DEF, so an ADP average past
+ *     ~13 rounds isn't a signal anyone is actually drafting him there.
+ *     Regression: Bryce Young (ADP 174.7), C.J. Stroud (165.4) and Isiah
+ *     Pacheco (163.5) all graded A/B despite not being realistic 12-team
+ *     picks.
+ *  3. MIDDLE ROUNDS (roundMin..roundMax, on the integer round). An
+ *     early-round stud showing a 1-2 spot ADP-vs-production gap is already
+ *     priced correctly, and per-rank point gaps are naturally huge that
+ *     early. Regression: De'Von Achane (round 1.9) and Javonte Williams
+ *     (3.9) both graded as "values" under an old whole-draft default.
+ *  4. GRADED A/B — a real outlier within his own position, not a fixed
+ *     points threshold (see gradeValueScores).
+ *
+ * Rule 1 is applied BEFORE the grade check by the caller's ordering here on
+ * purpose: a below-replacement player must not be able to occupy one of the
+ * position's top-30% slots.
+ */
+export function qualifiesForValueBoard(
+  r: GradedResult,
+  { draftableCutoff, roundMin, roundMax, teams }: ValueBoardRules,
+): boolean {
+  if (r.vorp <= 0) return false;
+  if (r.adp > draftableCutoff) return false;
+  // Integer round, not the fractional roundOf: "rounds 9-16" means every pick
+  // in those rounds, and comparing a fractional round against roundMax would
+  // cut at 16.0 (pick 181) and drop the rest of round 16.
+  const round = roundNumber(r.adp, teams);
+  if (round < roundMin || round > roundMax) return false;
+  return r.grade === 'A' || r.grade === 'B';
 }

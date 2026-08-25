@@ -20,7 +20,7 @@ A GitHub Actions workflow runs `npm run ingest` daily and commits the day's Parq
 
 ## What it finds
 
-**`npm run values POS ROUND_MIN ROUND_MAX`** — players in that range whose projected production is a real outlier for their draft slot, graded within their own position:
+**`npm run values POS ROUND_MIN ROUND_MAX`** — players in that range whose projected production is a real outlier for their draft slot, graded within their own position. Defaults to **rounds 4-10**, not the whole draft — the middle rounds are where a real value pick (a league-winner or a steady starter relative to where he actually goes) is worth looking for. An early-round stud showing a 1-2 spot ADP-vs-production gap isn't a real story — he's already priced correctly, and per-rank point gaps are naturally huge that early (see `metrics/vorp.ts`) — and mixing that in with genuine middle-round sleepers just dilutes the signal:
 
 ```
 league: 12-team PPR, 1QB/2RB/2WR/1TE/1FLEX
@@ -32,16 +32,21 @@ replacement level:
 
 RB · rounds 6-8 · A/B value plays, alphabetical:
 
-┌─────────┬───────────────────────┬──────┬─────┬───────┬────────────┬───────────────┬───────┬──────────┬─────────────┐
-│ (index) │ player                │ pos  │ adp │ round │ drafted_as │ produces_like │ grade │ espn_pts │ sleeper_pts │
-├─────────┼───────────────────────┼──────┼─────┼───────┼────────────┼───────────────┼───────┼──────────┼─────────────┤
-│ 0       │ 'Rhamondre Stevenson' │ 'RB' │ 85  │ 8     │ 'RB29'     │ 'RB25'        │ 'B'   │ '203'    │ '169'       │
-└─────────┴───────────────────────┴──────┴─────┴───────┴────────────┴───────────────┴───────┴──────────┴─────────────┘
+┌─────────┬───────────────────────┬──────┬──────┬───────┬────────────┬───────────────┬───────┬──────────┬─────────────┐
+│ (index) │ player                │ pos  │ adp  │ round │ drafted_as │ produces_like │ grade │ espn_pts │ sleeper_pts │
+├─────────┼───────────────────────┼──────┼──────┼───────┼────────────┼───────────────┼───────┼──────────┼─────────────┤
+│ 0       │ 'Rhamondre Stevenson' │ 'RB' │ 81   │ 7.7   │ 'RB28'     │ 'RB25'        │ 'B'   │ '203'    │ '169'       │
+│ 1       │ 'Rico Dowdle'         │ 'RB' │ 87.1 │ 8.2   │ 'RB31'     │ 'RB29'        │ 'B'   │ '186'    │ '161'       │
+└─────────┴───────────────────────┴──────┴──────┴───────┴────────────┴───────────────┴───────┴──────────┴─────────────┘
 ```
 
 `drafted_as`/`produces_like` are his rank by ADP vs. by production, per position — the gap between them is the story. `grade` curves the underlying point edge (production above what a player at his draft slot typically produces — points, not rank spots, because a 2-spot move at the top of a position is worth far more than a 6-spot move at the bottom; see `metrics/vorp.ts`) within his own position (A/B = top ~30%), and **only A/B players make the board at all** — there's no fixed row count. A short or empty section for a given range is the finding, not a bug: at the top of a position, ADP and production already agree closely, so there's often no real value to surface there. `espn_pts`/`sleeper_pts` are each source's own number, not an average — deliberately shown raw rather than folded into a single "confidence" label, so a disagreement between the two models is something you see directly rather than something a computed flag claims on your behalf.
 
 Players need **2+ real projection sources** to appear on this board at all, the same rule ADP consensus already uses. A player only ESPN or only Sleeper projects isn't a confirmed number, and the gap between the two sources can itself be a signal something changed — Jayden Higgins showed as a "value" WR purely because ESPN had dropped his projection after a season-ending injury while Sleeper's pre-injury number hadn't caught up yet, with nothing to check it against.
+
+Players also need a consensus ADP inside **13 rounds (156 picks in a 12-team league)** — deliberately shallower than the nominal 16-round full draft, because most real drafters spend their last 2-3 rounds on K/DEF rather than another skill player, so an ADP average past that depth isn't a real signal anyone's actually drafting him there. Without this, Bryce Young (ADP 174.7), C.J. Stroud (165.4), and Isiah Pacheco (163.5) were all showing up graded A/B despite none of them being realistic 12-team picks.
+
+Finally, a player must project **above replacement level** to appear. The value score is *relative* — it asks whether he outproduces the typical player taken at his draft slot — and a below-replacement player can absolutely do that while still being worse than a free waiver-wire pickup. Kyle Monangai graded B on a +5.0 value score whose entire comparison window was itself below replacement; the score was really saying "best of a bad neighborhood," which isn't a draft recommendation. The relative comparison is what finds real mispricing, so it stays — it just has an absolute floor under it now.
 
 **`npm run tiers POS`** — clusters a position by ADP, not raw projected points, and shows the point cliff between tiers. Points alone don't tier the way people draft: elite RB projections form an uneven staircase where each of the top few backs sits 20+ points clear of the next, so clustering on points puts every elite back in his own tier of one — ADP matches how real drafters group them instead:
 
