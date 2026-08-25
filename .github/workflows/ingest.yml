@@ -71,6 +71,7 @@ jobs:
           # since those lines start with ">" they render as a blockquote above
           # the report's title on GitHub.
           npm run -s report:md  > "$RUNNER_TEMP/report.md"
+          npm run -s rising:md >> "$RUNNER_TEMP/report.md"
           npm run -s values:md >> "$RUNNER_TEMP/report.md"
           npm run -s sos:md    >> "$RUNNER_TEMP/report.md"
           mv "$RUNNER_TEMP/report.md" REPORT.md
