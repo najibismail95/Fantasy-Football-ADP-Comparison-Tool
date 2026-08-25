@@ -1,7 +1,9 @@
 import { test, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { replacementLevels, type ProjectedPlayer } from './replacement.js';
-import { computeVorp, computeValueScore, gradeValueScores } from './vorp.js';
+import {
+  computeVorp, computeValueScore, gradeValueScores, qualifiesForValueBoard, type GradedResult,
+} from './vorp.js';
 import { LeagueConfigSchema } from './league-config.js';
 
 // A small synthetic 4-team league, easy to hand-verify: 4 QB, 8 RB, 8 WR, 4 TE.
@@ -307,5 +309,83 @@ describe('gradeValueScores', () => {
     assert.doesNotThrow(() => gradeValueScores(results));
     const graded = gradeValueScores(results);
     assert.ok(graded.every((r) => r.grade === 'C' && Number.isFinite(r.z)));
+  });
+});
+
+describe('qualifiesForValueBoard', () => {
+  // 12-team, 13-round draftable depth, middle-rounds window — the real
+  // defaults values.ts ships with.
+  const rules = { draftableCutoff: 156, roundMin: 4, roundMax: 10, teams: 12 };
+
+  // A player who passes every rule; individual tests break one at a time.
+  const ok = (over: Partial<GradedResult> = {}): GradedResult => ({
+    playerId: 'p', pos: 'RB', vorp: 25, adp: 80, vorpRank: 20, adpRank: 24,
+    valueScore: 10, z: 0.9, grade: 'B', ...over,
+  });
+
+  test('a player clearing every rule qualifies', () => {
+    assert.equal(qualifiesForValueBoard(ok(), rules), true);
+  });
+
+  test('below replacement level is rejected even with a strong value score and an A grade', () => {
+    // Regression (Kyle Monangai, 2026-08-24): graded B on a +5.0 valueScore
+    // while his own VORP was -18.8 and every player in his comparison window
+    // was ALSO below replacement — "best of a bad neighborhood" is not a
+    // draft recommendation. Rico Dowdle (-10.6) had the same shape.
+    assert.equal(qualifiesForValueBoard(ok({ vorp: -18.8, valueScore: 5, grade: 'A', z: 1.5 }), rules), false);
+  });
+
+  test('exactly at replacement level is rejected — the floor is strict', () => {
+    assert.equal(qualifiesForValueBoard(ok({ vorp: 0 }), rules), false);
+  });
+
+  test('past the draftable cutoff is rejected, however good the grade', () => {
+    // Regression: Bryce Young (ADP 174.7), C.J. Stroud (165.4) and Isiah
+    // Pacheco (163.5) all graded A/B despite not being realistic 12-team
+    // picks — most drafters spend the last rounds on K/DEF, not a QB4.
+    assert.equal(qualifiesForValueBoard(ok({ adp: 174.7, grade: 'A' }), rules), false);
+    assert.equal(qualifiesForValueBoard(ok({ adp: 163.5 }), rules), false);
+  });
+
+  test('the draftable cutoff is inclusive at the boundary pick', () => {
+    // 156 is in (round 13 exactly); 156.1 rounds to round 14 and is out on
+    // BOTH the cutoff and the round window.
+    assert.equal(qualifiesForValueBoard(ok({ adp: 156 }), { ...rules, roundMax: 13 }), true);
+    assert.equal(qualifiesForValueBoard(ok({ adp: 156.1 }), { ...rules, roundMax: 13 }), false);
+  });
+
+  test('an early-round player is rejected — already priced correctly', () => {
+    // Regression: De'Von Achane (round 1.9) and Javonte Williams (3.9) both
+    // graded as "values" under an old whole-draft default, despite a 1-2
+    // spot ADP-vs-production gap being noise that early.
+    assert.equal(qualifiesForValueBoard(ok({ adp: 12 }), rules), false);  // round 1
+    assert.equal(qualifiesForValueBoard(ok({ adp: 35.2 }), rules), false); // round 3
+  });
+
+  test('the round window uses the INTEGER round, so a whole round is never half-cut', () => {
+    // Round 10 in a 12-team league spans picks 109-120. With roundMax 10 the
+    // LAST pick of round 10 must still qualify — comparing a fractional round
+    // (roundOf(120,12) = 10.9) against 10 would drop it.
+    assert.equal(qualifiesForValueBoard(ok({ adp: 109 }), rules), true, 'first pick of round 10');
+    assert.equal(qualifiesForValueBoard(ok({ adp: 120 }), rules), true, 'last pick of round 10');
+    assert.equal(qualifiesForValueBoard(ok({ adp: 121 }), rules), false, 'first pick of round 11');
+  });
+
+  test('C/D/F grades are rejected — only real within-position outliers make the board', () => {
+    for (const grade of ['C', 'D', 'F'] as const) {
+      assert.equal(qualifiesForValueBoard(ok({ grade }), rules), false, `grade ${grade}`);
+    }
+    for (const grade of ['A', 'B'] as const) {
+      assert.equal(qualifiesForValueBoard(ok({ grade }), rules), true, `grade ${grade}`);
+    }
+  });
+
+  test('the round window travels with league size, not a hardcoded pick number', () => {
+    // ADP 80 is round 7 in a 12-team league but round 9 in a 10-team one —
+    // both inside 4-10, so it qualifies either way. ADP 100 is round 9 at 12
+    // teams (in) but round 11 at 8 teams (out).
+    assert.equal(qualifiesForValueBoard(ok({ adp: 80 }), { ...rules, teams: 10 }), true);
+    assert.equal(qualifiesForValueBoard(ok({ adp: 100 }), rules), true);
+    assert.equal(qualifiesForValueBoard(ok({ adp: 100 }), { ...rules, teams: 8 }), false);
   });
 });

@@ -1,17 +1,39 @@
 import { openDb } from '../db/client.js';
 import { DEFAULT_CONFIG, type LeagueConfig } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
-import { computeVorp, computeValueScore, gradeValueScores } from '../metrics/vorp.js';
+import { computeVorp, computeValueScore, gradeValueScores, qualifiesForValueBoard } from '../metrics/vorp.js';
 import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
-import { roundOf, roundNumber } from '../metrics/rounds.js';
+import { roundOf } from '../metrics/rounds.js';
 import { heading, note, table, MARKDOWN } from '../lib/render.js';
 
 /**
- * "Find me value QBs in the late rounds" — for any position, any round range.
+ * "Find me a middle-round value" — for any position, any round range.
  * npm run values [POS] [ROUND_MIN] [ROUND_MAX]
  * npm run values WR 9 15
- * npm run values          -> all positions, whole board
+ * npm run values          -> all positions, rounds 4-10
+ *
+ * The middle rounds are the default, not "the whole draft" (1-30) — that used
+ * to be the default and it was actively misleading: an early-round stud
+ * showing ADP rank 6 vs production rank 5 isn't a real story (he's already
+ * priced correctly, and per-rank point gaps are naturally huge that early —
+ * see vorp.ts), and a rounds-1-30 board mixed those in alongside genuine
+ * middle-round sleepers, diluting the exact signal this command exists to
+ * find. Regression: De'Von Achane (round 1.9, ADP rank 6 vs production rank
+ * 5) and Javonte Williams (round 3.9, rank 17 vs 15) both graded as
+ * "values" under the old 1-30 default despite neither being a real
+ * mid-draft edge — a player already being drafted almost exactly where he
+ * produces isn't a value. The middle rounds are where a real one — a player
+ * who could be a league-winner or a steady starter relative to where he
+ * actually goes — is worth looking for.
+ *
+ * 4-10 rather than a tighter 5-9: measured against real data, a 5-9 window
+ * was cutting the single strongest value plays in the pool purely on the
+ * boundary — Travis Etienne (round 4.7, the highest z-score of any player)
+ * and Garrett Wilson (round 4.8, the highest raw value score) both sat just
+ * outside it, as did Jake Ferguson at 10.3. Widening by one round each way
+ * recovers those without reaching into the early-round "already priced
+ * correctly" zone the 1-30 default was rejected for.
  */
 
 // Flags are stripped before positional parsing, or `--markdown` lands in the
@@ -19,8 +41,8 @@ import { heading, note, table, MARKDOWN } from '../lib/render.js';
 // producing an empty board rather than an error. Same pattern as tiers.ts.
 const [posArg, minArg, maxArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const posFilter = posArg?.toUpperCase();
-const roundMin = minArg ? Number(minArg) : 1;
-const roundMax = maxArg ? Number(maxArg) : 30;
+const roundMin = minArg ? Number(minArg) : 4;
+const roundMax = maxArg ? Number(maxArg) : 10;
 
 
 const conn = await openDb();
@@ -119,8 +141,32 @@ const adpByPlayer = new Map(consensus.map((r) => [r.playerId, r.adp]));
 const droppedForThinProjections = vorpRows.filter(
   (v) => adpByPlayer.has(v.playerId) && (sourcesByPlayer.get(v.playerId) ?? 0) < 2,
 ).length;
+
+// A real ADP average past this depth doesn't mean a skill player is actually
+// getting drafted — most real drafters spend their last 2-3 rounds of a
+// 16-round draft on K/DEF, not a QB4 or RB6, so the realistic ceiling for a
+// skill position is shallower than the nominal team*16 full-draft size.
+// 13 rounds, not 16: confirmed against real cases the flat round-range
+// filter below was letting through as "value" — Bryce Young (ADP 174.7),
+// C.J. Stroud (165.4), and Isiah Pacheco (163.5) were all showing up graded
+// A/B despite none of them being realistic 12-team picks, because nothing
+// upstream of the round-range filter had ever excluded them from the pool
+// at all. Same "some ADP readings shouldn't be trusted as real draft signal"
+// reasoning as the two filters above (thin ADP data, thin projection data) —
+// this is a third population-narrowing rule, not a display-only cutoff, so a
+// deep player doesn't quietly distort a real player's windowed-median
+// comparison either.
+const DRAFTABLE_CUTOFF = cfg.teams * 13;
+const droppedForDraftability = vorpRows.filter(
+  (v) => adpByPlayer.has(v.playerId) && (sourcesByPlayer.get(v.playerId) ?? 0) >= 2 && adpByPlayer.get(v.playerId)! > DRAFTABLE_CUTOFF,
+).length;
+
 const valueInput = vorpRows
-  .filter((v) => adpByPlayer.has(v.playerId) && (sourcesByPlayer.get(v.playerId) ?? 0) >= 2)
+  .filter((v) =>
+    adpByPlayer.has(v.playerId) &&
+    (sourcesByPlayer.get(v.playerId) ?? 0) >= 2 &&
+    adpByPlayer.get(v.playerId)! <= DRAFTABLE_CUTOFF,
+  )
   .map((v) => ({ playerId: v.playerId, pos: v.pos, vorp: v.vorp, adp: adpByPlayer.get(v.playerId)! }));
 
 // Ranked on the FULL position pool, before any round-range filter. adpRank
@@ -152,23 +198,17 @@ const MAX_ROWS = 20;
  */
 const REPORT_POSITIONS = ['QB', 'RB', 'WR', 'TE'] as const;
 
+// The selection rules themselves (above replacement, draftable depth, middle
+// rounds, graded A/B) live in metrics/vorp.ts's qualifiesForValueBoard —
+// extracted there specifically so they have real test coverage instead of
+// living as inline script logic nothing could catch a regression in. See its
+// doc comment for the full reasoning and the regression case behind each rule.
+const boardRules = { draftableCutoff: DRAFTABLE_CUTOFF, roundMin, roundMax, teams: cfg.teams };
+
 const board = (pos?: string) =>
   values
     .filter((v) => !pos || v.pos === pos)
-    // Filter on the INTEGER round, not the fractional position: "rounds 9-16"
-    // means every pick in those rounds. Comparing the fractional roundOf against
-    // roundMax would cut at 16.0 (pick 181) and drop the rest of round 16.
-    .filter((v) => {
-      const rd = roundNumber(v.adp, cfg.teams);
-      return rd >= roundMin && rd <= roundMax;
-    })
-    // Graded, not force-capped: only players whose valueScore is a real
-    // outlier WITHIN THEIR OWN POSITION (top ~30%, curved — see grade.ts) make
-    // the board at all. Early rounds legitimately return few or zero rows,
-    // because ADP and production already agree closely at the top of a
-    // position — there is no real value to find there, and a flat top-15 used
-    // to paper over that by relisting the consensus order every time.
-    .filter((r) => r.grade === 'A' || r.grade === 'B')
+    .filter((v) => qualifiesForValueBoard(v, boardRules))
     .sort((a, b) => b.valueScore - a.valueScore)
     .slice(0, MAX_ROWS)
     .map((r) => ({
@@ -197,9 +237,11 @@ const legend =
   `projection, compare them yourself. ${col('drafted_as')}/${col('produces_like')} ` +
   `are his rank by ADP vs. by production, per position — the gap between them ` +
   `is the story. ${col('grade')} curves the underlying point edge within his ` +
-  `own position (A/B = top ~30%). Only A/B players make this board, listed ` +
-  `alphabetically — an empty or short section means there's no real ` +
-  `value in that range, not a bug.`;
+  `own position (A/B = top ~30%). A player must also project ABOVE replacement ` +
+  `level to appear — outproducing the typical pick at your draft slot doesn't ` +
+  `help if the whole neighborhood is worse than a waiver-wire add. Only A/B ` +
+  `players make this board, listed alphabetically — an empty or short section ` +
+  `means there's no real value in that range, not a bug.`;
 const thinDataNote =
   `${droppedForThinData} players excluded league-wide: fewer than 2 real ADP ` +
   `sources after removing values censored at a source's ceiling.`;
@@ -208,6 +250,11 @@ const thinProjNote =
   `projection sources, so "produces_like" would really just be one source's ` +
   `unchecked number — often because a player was dropped from one source's ` +
   `pool (e.g. a season-ending injury) while the other hasn't caught up yet.`;
+const draftabilityNote =
+  `${droppedForDraftability} more excluded league-wide: ADP beyond ${DRAFTABLE_CUTOFF} ` +
+  `picks (${cfg.teams}-team, 13 rounds) — most real drafters spend their last few ` +
+  `rounds on K/DEF, not another skill player, so an ADP average past this depth ` +
+  `isn't a real signal that someone is actually being drafted there.`;
 
 // One pass over the already-computed board per position, rather than four
 // separate invocations of this script — the expensive part (projections, VORP,
@@ -224,6 +271,7 @@ if (MARKDOWN && !posFilter) {
   note(legend);
   if (droppedForThinData > 0) note(thinDataNote);
   if (droppedForThinProjections > 0) note(thinProjNote);
+  if (droppedForDraftability > 0) note(draftabilityNote);
   for (const pos of REPORT_POSITIONS) {
     heading(pos, 3);
     table(board(pos));
@@ -233,5 +281,6 @@ if (MARKDOWN && !posFilter) {
   console.log(`${legend}\n`);
   if (droppedForThinData > 0) console.log(`(${thinDataNote})\n`);
   if (droppedForThinProjections > 0) console.log(`(${thinProjNote})\n`);
+  if (droppedForDraftability > 0) console.log(`(${draftabilityNote})\n`);
   table(board(posFilter));
 }
