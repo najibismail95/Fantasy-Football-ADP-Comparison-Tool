@@ -99,10 +99,6 @@ function shiftLabel(delta: number): string {
  * Selection is by ADP — the top 24 drafted at a position is the pool a drafter
  * is actually choosing between, and letting schedule pick the pool would
  * surface deep bench players whose easy schedule nobody will ever use.
- *
- * Shared by the summary and the full table so the two can never disagree about
- * who is in scope: a player in the summary who is missing from the table below
- * it would read as a bug even if both were individually defensible.
  */
 const pool = (pos: string) =>
   sos
@@ -111,72 +107,66 @@ const pool = (pos: string) =>
     .slice(0, TOP_N);
 
 /**
- * Display order is by playoff schedule, easiest first — deliberately NOT the
- * alphabetical order the value board and arbitrage table use. Those went
- * alphabetical because nothing visible justified their row order, so
- * top-to-bottom implied a ranking the reader could not check. Here every cell
- * states its own placing, so the sort implies nothing that isn't on the row.
+ * Deduplicated by team, sorted easiest playoff schedule first — what board()
+ * slices its easiest/hardest tables from.
  *
- * It also groups teammates, which is the honest shape of the data: SOS is a
- * team property, so Chase and Higgins are one schedule listed twice. Sorting
- * by it puts them adjacent and makes ~16 distinct schedules read as 16 rather
- * than as 24 independent readings.
+ * SOS is a team property, so an undeduplicated top-N at WR spends slots on
+ * Chase and Higgins describing one Bengals schedule twice — dedup turns ~16
+ * distinct schedules into 16 rows instead of 24 readings of the same ~16
+ * facts. The lowest-ADP player on each team stands in for it, since he's the
+ * one a drafter is most likely to actually be weighing.
  */
-const board = (pos: string) =>
-  pool(pos)
-    .sort((a, b) => b.postIdx - a.postIdx)
-    .map((r) => ({
-      player: r.player,
-      team: r.team,
-      bye: r.bye ?? '—',
-      adp: Number(adpByPlayer.get(r.playerId)!.toFixed(1)),
-      // Letter first for scanning a whole column at once, exact placing after
-      // it because the letter alone buckets six teams into one A and hides the
-      // ordering inside it — and "2nd easiest vs 6th easiest" is the entire
-      // difference a drafter is trying to see.
-      'weeks 1-14': `${r.regGrade} · ${rankLabel(r.regRank, teamCount)}`,
-      'weeks 15-17': `${r.postGrade} · ${rankLabel(r.postRank, teamCount)}`,
-      // The column worth reading last and thinking about first: a player who
-      // looks cheap all year and then meets his hardest defenses in the exact
-      // three weeks a title is decided.
-      'playoff shift': shiftLabel(r.postIdx - r.regIdx),
-    }));
-
-const SUMMARY_N = 5;
-
-/**
- * One row per position: the five easiest playoff schedules, each named by the
- * most-drafted player who has it.
- *
- * Deduplicated by team, which is the whole reason this isn't just the top five
- * rows of the table below. SOS is a team property, so an undeduplicated top
- * five at WR spends two of its slots on Chase and Higgins describing one
- * Bengals schedule — a summary that reports four distinct facts in five slots.
- * Grouping first and taking the lowest-ADP player on each team gives five real
- * schedules, each labelled by the player a drafter is most likely to be
- * weighing.
- *
- * Playoffs only. The regular-season ordering is in the full table, and over
- * fourteen games the whole league converges close enough to average that a
- * "top five" there is mostly noise — which is exactly the magnitude caveat
- * this file already carries.
- */
-const summaryRow = (pos: string) => {
+const dedupedByTeam = (pos: string) => {
   // pool() is ADP-ascending, so the first player seen for a team is its
   // most-drafted one.
   const byTeam = new Map<string, ReturnType<typeof pool>[number]>();
   for (const r of pool(pos)) if (!byTeam.has(r.team)) byTeam.set(r.team, r);
+  return [...byTeam.values()].sort((a, b) => b.postIdx - a.postIdx); // easiest first
+};
 
-  const top = [...byTeam.values()]
-    .sort((a, b) => b.postIdx - a.postIdx)
-    .slice(0, SUMMARY_N);
+const formatRow = (r: ReturnType<typeof pool>[number]) => ({
+  player: r.player,
+  team: r.team,
+  bye: r.bye ?? '—',
+  adp: Number(adpByPlayer.get(r.playerId)!.toFixed(1)),
+  // Letter first for scanning a whole column at once, exact placing after
+  // it because the letter alone buckets six teams into one A and hides the
+  // ordering inside it — and "2nd easiest vs 6th easiest" is the entire
+  // difference a drafter is trying to see.
+  'weeks 1-14': `${r.regGrade} · ${rankLabel(r.regRank, teamCount)}`,
+  'weeks 15-17': `${r.postGrade} · ${rankLabel(r.postRank, teamCount)}`,
+  // The column worth reading last and thinking about first: a player who
+  // looks cheap all year and then meets his hardest defenses in the exact
+  // three weeks a title is decided.
+  'playoff shift': shiftLabel(r.postIdx - r.regIdx),
+});
 
-  const headers = ['1st', '2nd', '3rd', '4th', '5th'];
-  const row: Record<string, string> = { pos };
-  // Every position gets all five keys, blank if short, so the union-of-keys
-  // header in render.ts stays stable instead of shifting per row.
-  headers.forEach((h, i) => { row[h] = top[i] ? `${top[i]!.player} (${top[i]!.team})` : '—'; });
-  return row;
+const EASIEST_N = 5;
+const HARDEST_N = 5;
+
+/**
+ * The 5 easiest AND 5 hardest playoff schedules at the position, as two
+ * SEPARATE tables — not the full top-24-by-ADP board this used to be, and
+ * not one combined 10-row table either. 24 rows of grade+ranking+shift per
+ * position was more than anyone actually reads; the two ends are where the
+ * real drafting decisions live (who to prioritize for a title week, who's a
+ * real playoff-schedule risk), and the middle ~14 teams cluster too close to
+ * average to be worth a row each (see gradeNote's magnitude caveat).
+ * Splitting easiest/hardest into their own tables — rather than one table a
+ * reader has to notice the rank jumps in — makes which half of the gap
+ * they're looking at explicit instead of inferred. Deduplicated by team,
+ * same reasoning as dedupedByTeam.
+ *
+ * Sliced with an overlap guard (Math.max(EASIEST_N, len - HARDEST_N)) rather
+ * than a flat slice(-HARDEST_N), so a position with fewer than 10 distinct
+ * teams in its pool never double-lists the same team in both tables.
+ */
+const board = (pos: string) => {
+  const byEase = dedupedByTeam(pos);
+  return {
+    easiest: byEase.slice(0, EASIEST_N).map(formatRow),
+    hardest: byEase.slice(Math.max(EASIEST_N, byEase.length - HARDEST_N)).map(formatRow),
+  };
 };
 
 const col = (name: string) => (MARKDOWN ? `\`${name}\`` : name);
@@ -185,8 +175,11 @@ const legend =
   `playoffs. Each shows a grade curved against all ${teamCount} teams (A = easiest ~10%, ` +
   `F = hardest ~10%) followed by that team's exact placing, counted from whichever end ` +
   `is closer — so 4th easiest and 2nd hardest both mean what they say. ` +
-  `${col('playoff shift')} says whether it gets easier or harder when it counts. Rows ` +
-  `are the 24 most-drafted at the position, easiest playoff schedule first.`;
+  `${col('playoff shift')} says whether it gets easier or harder when it counts. Each ` +
+  `position below is split into its ${EASIEST_N} easiest and ${HARDEST_N} hardest playoff ` +
+  `schedules among the most-drafted (one row per team) — two separate tables, not one ` +
+  `combined list, so which end you're looking at is never something you have to notice ` +
+  `from a rank jumping mid-table.`;
 const gradeNote =
   `Both are placings, not magnitudes: three playoff games swing much wider than fourteen ` +
   `regular-season ones, so 4th easiest over weeks 15-17 is a bigger real edge than 4th ` +
@@ -198,26 +191,19 @@ const basisNote =
 
 const shown = POSITIONS.filter((pos) => !posFilter || pos === posFilter);
 
-// A skim view above the detail. sos:md writes 96 rows into REPORT.md, which is
-// the right amount to have and the wrong amount to open a section with.
-const summaryNote =
-  `Easiest ${SUMMARY_N} playoff schedules (weeks 15-17) at each position, one player per ` +
-  `team — teammates share a schedule, so the most-drafted player stands in for his. ` +
-  `Full boards below.`;
-
 if (MARKDOWN) {
   heading('Strength of schedule');
   note(`${season} season, ${DEFAULT_CONFIG.scoring} scoring. ${basisNote}`);
   note(legend);
   note(gradeNote);
 
-  heading('Easiest playoff schedules', 3);
-  note(summaryNote);
-  table(shown.map(summaryRow));
-
   for (const pos of shown) {
     heading(pos, 3);
-    table(board(pos));
+    const { easiest, hardest } = board(pos);
+    heading('Easiest', 4);
+    table(easiest);
+    heading('Hardest', 4);
+    table(hardest);
   }
 } else {
   console.log(`\nstrength of schedule — ${season} season, ${DEFAULT_CONFIG.scoring}\n`);
@@ -225,12 +211,12 @@ if (MARKDOWN) {
   console.log(`${gradeNote}\n`);
   console.log(`(${basisNote})\n`);
 
-  console.log(`${summaryNote}\n`);
-  table(shown.map(summaryRow));
-  console.log('');
-
   for (const pos of shown) {
     console.log(`${pos}:`);
-    table(board(pos));
+    const { easiest, hardest } = board(pos);
+    console.log('Easiest:');
+    table(easiest);
+    console.log('\nHardest:');
+    table(hardest);
   }
 }

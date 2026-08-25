@@ -59,30 +59,27 @@ Tier 2  (adp 41-47, 205–211 pts, 2 players)
 
 Tier count scales to the draftable pool automatically — it's not a settable knob, because forcing a small tier count silently produces tiers that span 100+ points and stop meaning anything.
 
-**`npm run sos [POS]`** — opens with the five easiest playoff schedules at each position, then the 24 most-drafted players at a position with how hard their schedule is in the fantasy regular season versus the fantasy playoffs:
-
-```
-┌─────────┬──────┬────────────────────────┬─────────────────────────┬───────────────────────┐
-│ (index) │ pos  │ 1st                    │ 2nd                     │ 3rd                   │
-├─────────┼──────┼────────────────────────┼─────────────────────────┼───────────────────────┤
-│ 1       │ 'RB' │ 'Jeremiyah Love (ARI)' │ 'Jonathan Taylor (IND)' │ 'Travis Etienne (NO)' │
-│ 2       │ 'WR' │ 'Malik Nabers (NYG)'   │ 'Justin Jefferson (MIN)'│ "Ja'Marr Chase (CIN)" │
-└─────────┴──────┴────────────────────────┴─────────────────────────┴───────────────────────┘
-```
-
-That summary is deduplicated by team, one player per schedule. Teammates share a schedule, so an undeduplicated top five at WR would spend two slots on Chase and Higgins describing the same Bengals draw — four facts in five slots. The most-drafted player on each team stands in for it.
-
+**`npm run sos [POS]`** — the 5 easiest and 5 hardest playoff schedules at a position (out of the most-drafted, one row per team), with how hard each holds up in the fantasy regular season versus the fantasy playoffs:
 
 ```
 RB:
-┌─────────┬───────────────────────┬───────┬─────┬──────┬────────────────────┬────────────────────┬───────────────┐
-│ (index) │ player                │ team  │ bye │ adp  │ weeks 1-14         │ weeks 15-17        │ playoff shift │
-├─────────┼───────────────────────┼───────┼─────┼──────┼────────────────────┼────────────────────┼───────────────┤
-│ 0       │ 'Jeremiyah Love'      │ 'ARI' │ 14  │ 26.7 │ 'F · 3rd hardest'  │ 'A · 2nd easiest'  │ 'much easier' │
-│ 21      │ 'Saquon Barkley'      │ 'PHI' │ 10  │ 13.8 │ 'A · 2nd easiest'  │ 'D · 4th hardest'  │ 'much harder' │
-│ 23      │ 'Christian McCaffrey' │ 'SF'  │ 8   │ 5.8  │ 'C · 16th easiest' │ 'F · 2nd hardest'  │ 'much harder' │
-└─────────┴───────────────────────┴───────┴─────┴──────┴────────────────────┴────────────────────┴───────────────┘
+Easiest:
+┌─────────┬───────────────────┬───────┬─────┬──────┬────────────────────┬───────────────────┬───────────────┐
+│ (index) │ player            │ team  │ bye │ adp  │ weeks 1-14         │ weeks 15-17       │ playoff shift │
+├─────────┼───────────────────┼───────┼─────┼──────┼────────────────────┼───────────────────┼───────────────┤
+│ 0       │ 'Jeremiyah Love'  │ 'ARI' │ 14  │ 26.2 │ 'F · 3rd hardest'  │ 'A · 2nd easiest' │ 'much easier' │
+└─────────┴───────────────────┴───────┴─────┴──────┴────────────────────┴───────────────────┴───────────────┘
+
+Hardest:
+┌─────────┬───────────────────────┬───────┬─────┬──────┬────────────────────┬───────────────────┬───────────────┐
+│ (index) │ player                │ team  │ bye │ adp  │ weeks 1-14         │ weeks 15-17       │ playoff shift │
+├─────────┼───────────────────────┼───────┼─────┼──────┼────────────────────┼───────────────────┼───────────────┤
+│ 2       │ 'Saquon Barkley'      │ 'PHI' │ 10  │ 13.4 │ 'A · 2nd easiest'  │ 'D · 4th hardest' │ 'much harder' │
+│ 4       │ 'Christian McCaffrey' │ 'SF'  │ 8   │ 5.6  │ 'C · 16th easiest' │ 'F · 2nd hardest' │ 'much harder' │
+└─────────┴───────────────────────┴───────┴─────┴──────┴────────────────────┴───────────────────┴───────────────┘
 ```
+
+Easiest and Hardest are two separate tables, not one combined list — not the full most-drafted board this used to be, either. 24 rows of grade+ranking+shift per position was more than anyone actually reads, and the two ends are where the real drafting decisions live; the ~14 teams in between cluster too close to average to be worth a row each (see the magnitude caveat below). Deduplicated by team, same as the summary above it.
 
 Each cell is a grade curved against all 32 teams (A = easiest ~10%, F = hardest ~10%) followed by the exact placing, counted from whichever end is nearer — "2nd hardest" rather than "31st easiest", because nobody counts a bad schedule from the good end. The letter is for scanning a column at a glance; the placing is what separates the 2nd-easiest playoff draw from the 6th, which a letter alone buckets together. Both are computed *within* a position, because a defense that stuffs the run while leaking to tight ends is not "good" in a way that means anything until you say good against whom.
 
