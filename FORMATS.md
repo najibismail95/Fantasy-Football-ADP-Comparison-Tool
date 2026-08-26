@@ -2,7 +2,9 @@
 
 Extends the [PLAN.md §0](./PLAN.md) spike. All findings measured live on 2026-07-26. Working calculator: [`src/metrics/replacement.ts`](./src/metrics/replacement.ts).
 
-> **§1–§3 describe the shipped system. §4 does not** — it proposes a persisted config schema and an NL layer, neither of which was built. See the banner on §4. *Audited 2026-08-25.*
+> **§1–§3 describe the shipped system. §4 does not** — it proposes a persisted config schema and an NL layer, neither of which was built. See the banner on §4. **§5 is a live decision record**, not history. *Audited 2026-08-25.*
+>
+> 👉 **Considering half-PPR / Standard / superflex support? Read [§5](#5-decision-record--multi-format-support-declined) first.** It was scoped with measurements on 2026-08-25 and declined, and it lists the specific conditions that would reopen it.
 
 The original plan pinned one canonical format (12-team PPR 1QB) and treated format as a tag on ADP rows. That's too thin: format doesn't just shift prices, **it changes which strategy is correct**. This document reworks the model around that.
 
@@ -65,6 +67,8 @@ Measured across the 154 players inside the draftable range (PPR ADP < 156, the c
 Half-PPR sits inside normal day-to-day ADP drift — for practical purposes it *is* the PPR board. Standard moves the typical player about half a round, with a tail of roughly fifteen players moving two rounds or more. Superflex is a different board, which independently corroborates the ESPN superflex ranks above.
 
 ⚠️ One day's snapshot, Sleeper only, and the `max` column is individual players who may be thin-sample. Enough to answer "does format move ADP"; not enough to build on.
+
+These numbers are half the evidence behind **[§5](#5-decision-record--multi-format-support-declined)**, which declined multi-format support on 2026-08-25. The other half is how little *projected rank* moves.
 
 **Why this doesn't change the PPR pin on arbitrage.** The constraint is narrower than "no source publishes other formats" — it's that **ESPN and Yahoo** publish PPR only, so a three-source consensus can exist in PPR and nowhere else. Sleeper's superflex series alone can't produce a leave-one-out median; one source has nothing to be an outlier against. The pin stands, for a more specific reason than the one previously written here.
 
@@ -189,7 +193,7 @@ The one real cost of not persisting: there's no history of how VORP or tiers mov
 >
 > Closing that gap is roughly half a day: fetch `/1` and `/8` alongside `/3` (taking projections from all three but ADP and ranks from `/3` only — ADP is one global series, so writing it three times is the `adp_current` fanout bug), then thread `--scoring=` through `values` and `tiers`. Everything downstream is already scoring-general: `blendProjections` keys on `${playerId}|${scoring}`, and `replacement.ts`/`vorp.ts` consume whatever points they're handed.
 >
-> **Scoped and declined** (2026-08-25), so this stays documented rather than built. Measured on Sleeper's three scorings, position rank barely moves: QB is identical across all three, TE averages 1.3 spots, RB 2.15, WR 2.6. The real signal is about a dozen WR/RB — Rashee Rice WR12→WR24 in Standard, Mike Evans WR21→WR12 — which didn't justify taking REPORT.md from 254 lines to ~584, printing an identical QB board three times.
+> **Scoped and declined** on 2026-08-25 — the measurements, the report-structure cost, and the conditions that would reopen it are all in **[§5](#5-decision-record--multi-format-support-declined)**.
 
 ~~**The NL layer must know the user's league.**~~ **Moot — there is no NL layer** (see [PLAN.md §5](./PLAN.md)). The argument is kept because it transfers directly to the CLI, where it's still unresolved:
 
@@ -204,3 +208,64 @@ The one real cost of not persisting: there's no history of how VORP or tiers mov
 **Coverage caveat on the numbers above.** The 342-player projection pool is ESPN's top 350; QB and TE depth (49/50) is adequate for 12-team superflex (QB24) but thin for deeper configs. Production should pull a wider projection set before computing replacement levels for 14-team or deep-bench formats.
 
 > **Unchanged, and still the binding constraint** (2026-08-25). `src/config.ts` still requests ESPN's top 350. What did change is that projections are now **blended across ESPN and Sleeper** (`metrics/projections.ts`), which deepened the pool without widening the ESPN request — Sleeper projects players ESPN's top 350 cuts off. It also fixed a separate problem: ESPN alone compresses the middle of every position so hard that six startable RBs land within a projected point of each other, which makes tiering and grading meaningless regardless of pool depth. The blend is load-bearing, not a redundancy.
+
+---
+
+## 5. Decision record — multi-format support (declined)
+
+**Status: declined 2026-08-25.** Unlike §4 above, this is not a historical proposal — it's a current decision with the measurements behind it. Reopen it only against the conditions at the bottom.
+
+**The proposal:** support half-PPR and Standard alongside PPR — ingest ESPN's `/1` and `/8` projections, thread a `--scoring=` flag through `values`/`tiers`, and surface the results.
+
+### Why it was declined
+
+**1. The formats barely disagree.** Two independent measurements, both on 2026-08-25 data.
+
+*ADP* (§1 has the full table): median gap vs PPR is **3.8 picks** for half-PPR and **6.9** for Standard, across the 154 players inside the draftable range. Half-PPR sits inside normal day-to-day ADP drift — for practical purposes it *is* the PPR board.
+
+*Projected position rank*, measured on Sleeper's three scorings across the top 40 at each position:
+
+| Pos | avg shift | max | movers ≥5 spots |
+|---|---|---|---|
+| **QB** | **0.0** | **0** | **0** |
+| TE | 1.3 | 3 | 0 |
+| RB | 2.15 | 7 | 4 |
+| WR | 2.6 | 12 | 8 |
+
+QB is **identical** across all three formats — quarterbacks have no receptions, and receptions are the only input that changes. TE barely moves, because every TE loses receptions together and rank is relative. The entire real signal is about a dozen WR/RB: Rashee Rice WR12→WR24 in Standard, Mike Evans WR21→WR12, Jeremiyah Love RB12→RB19.
+
+**2. The report cost is disproportionate.** Only **2 of REPORT.md's 6 sections** are scoring-sensitive at all:
+
+| Section | Basis | Scoring-sensitive? |
+|---|---|---|
+| Integrity checks | ADP | No |
+| Resolution tiers | crosswalk | No |
+| Cross-platform arbitrage | ADP | No — permanently PPR (§1) |
+| Who's rising | ADP | No |
+| **Value board** | projections | **Yes** — 54 lines |
+| **Strength of schedule** | `fantasy_points_ppr` | **Yes** — 111 lines |
+
+Tripling those two takes REPORT.md from **254 lines to ~584**, and prints a byte-identical QB value board three times plus a near-identical TE one. That runs against the direction this report has been going — the SOS tables were *cut* in PR #21 precisely because 24 rows per position was "more than anyone actually reads."
+
+There's also a coherence problem: the arbitrage section is permanently pinned to PPR because only ESPN and Yahoo-plus-Sleeper agreement exists there. A document holding a PPR-only arbitrage table next to a Standard value board is internally inconsistent in a way that's hard to caption honestly.
+
+**3. The alternative design, if this is ever revived.** Don't print three boards — print the *disagreement*. A single "format sensitivity" section listing only players whose position rank moves materially between formats is ~10-15 rows and ~20 lines, against ~330 for full triplication. This project already has that pattern and it works: `sos`'s `playoff shift` column shows the delta between two views rather than printing both, and the README calls it "the column worth reading." Full per-format boards belong in the CLI (`--scoring=STD`), where a Standard drafter wants one board rather than a comparison.
+
+### What it would cost to build
+
+Roughly **half a day**, and less than it looks — most of it already exists:
+
+- `blendProjections` already keys on `${playerId}|${scoring}`
+- `values.ts` and `tiers.ts` already filter on `cfg.scoring`, not a hardcoded string
+- `replacement.ts` / `vorp.ts` are scoring-agnostic
+- Sleeper already ingests all three (`pts_ppr`, `pts_half_ppr`, `pts_std`)
+
+The only real gap is ESPN, which contributes PPR alone — and that's a hard blocker rather than a partial one, because `values` requires 2+ projection sources, so a HALF or STD run currently returns an **empty board rather than a wrong one**. Fetch `/1` and `/8` alongside `/3`, taking projections from all three but **ADP and ranks from `/3` only** — ADP is one global series, so writing it three times is the `adp_current` fanout bug. See §4 for the endpoint details.
+
+### What would reopen this
+
+- **Superflex/2QB support.** The reasoning above does *not* transfer. 2QB ADP differs from PPR by a median of 11.9 picks and 55 at p90, and ESPN's own superflex ranks move Burrow from 108 to 11 (§1). That's a genuinely different board, and "format barely matters" would be the wrong premise to carry into it.
+- **A second non-PPR projection source**, removing the ESPN blocker and making the change nearly free.
+- **A real user in a Standard league.** The measurements say the median player moves half a round; they don't say that's irrelevant to someone actually drafting it.
+
+What should *not* reopen it: the observation that Sleeper publishes twelve ADP series (§1). That was known when this was declined — availability was never the constraint.

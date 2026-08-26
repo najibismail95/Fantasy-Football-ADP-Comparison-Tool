@@ -53,7 +53,7 @@ Header: x-fantasy-filter: {"players":{"limit":300,"sortDraftRanks":{"sortPriorit
 >
 > The three differ in **exactly one** input: points per reception (1.0 / 0.5 / 0.0). QB projections are byte-identical across all three (Josh Allen 369.67 in every one), and every gap equals the player's reception count — McBride's PPR-minus-Standard is 107.81 against 107.82 projected receptions. So `appliedTotal(/3) − 0.5 × stat[53] == appliedTotal(/8)` holds to the decimal, which makes a useful drift assertion if these are ever ingested.
 >
-> Only `/3` is ingested today. Multi-format scoring was scoped and **declined** — the payoff was about a dozen WR/RB whose position rank moves (QB doesn't move at all, TE barely), which didn't justify tripling the report. See [FORMATS.md §1](./FORMATS.md).
+> Only `/3` is ingested today. Multi-format scoring was scoped and **declined** on 2026-08-25 — the payoff was about a dozen WR/RB whose position rank moves (QB doesn't move at all, TE barely), which didn't justify tripling the report. Full decision record, with the measurements and the conditions that would reopen it: [FORMATS.md §5](./FORMATS.md#5-decision-record--multi-format-support-declined).
 
 Returns per player:
 - `ownership.averageDraftPosition` → **the ADP** (Gibbs 1.66, Bijan 2.58, Nacua 3.65)
