@@ -223,7 +223,7 @@ Ingest, entity resolution, and the metrics layer (VORP, tiers, strength of sched
 
 Everything the original build plan scoped is either done or deliberately closed — see [PLAN.md §6](./PLAN.md#6-phased-delivery). Two known gaps, both documented rather than hidden:
 
-- **The CLI is fixed to 12-team PPR, 1QB.** The metrics layer is genuinely config-general — hand `replacement.ts` a superflex config and it returns the right baselines — but no command takes a flag to do so, and only PPR projections are ingested, so a half-PPR config would return an empty board rather than a wrong one. [FORMATS.md §2](./FORMATS.md) has what a config flag would actually take.
+- **The CLI is fixed to 12-team PPR, 1QB.** The metrics layer is genuinely config-general — hand `replacement.ts` a superflex config and it returns the right baselines — but no command takes a flag to do so. Sleeper contributes half-PPR and Standard projections already; ESPN contributes PPR only, so in either other scoring every player falls below `values`' 2-source guard and the board comes back empty rather than wrong. [FORMATS.md §2](./FORMATS.md) has what a config flag would actually take, and §4 has why multi-scoring was scoped and declined.
 - **Computed metrics aren't persisted.** VORP and tiers are recomputed per run, so there's history of how *ADP* moved but not of how a player's value grade did. [FORMATS.md §4](./FORMATS.md) covers the tradeoff.
 
 Personal research tool. The sources are undocumented or unofficial — fine for private use, but check licensing before redistributing anything.

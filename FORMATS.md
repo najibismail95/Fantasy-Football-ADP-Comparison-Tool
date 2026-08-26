@@ -10,15 +10,21 @@ The original plan pinned one canonical format (12-team PPR 1QB) and treated form
 
 ## 1. What formats we can actually get
 
-Original spike results below (2026-07-26) measured this against ESPN, Sleeper-via-beatadp, and FantasyPros — the only sources available at the time. Sleeper ADP now comes directly from Sleeper's own API instead of beatadp, and Yahoo has since been added; both are still PPR/1QB only, so the shape of the finding hasn't changed even though beatadp and FantasyPros ECR are gone. Current sources:
+Original spike results below (2026-07-26) measured this against ESPN, Sleeper-via-beatadp, and FantasyPros — the only sources available at the time. Sleeper ADP now comes directly from Sleeper's own API instead of beatadp, and Yahoo has since been added. The table shows what each source publishes; ✅ marks what is actually **ingested**, which for Sleeper is one series out of twelve (see below).
 
-| Format | ESPN ADP | ESPN rank | Sleeper | Yahoo ADP |
+| Format | ESPN ADP | ESPN rank | Sleeper ADP | Yahoo ADP |
 |---|---|---|---|---|
-| **PPR, 1QB** | ✅ | ✅ `PPR` | ✅ | ✅ (unlabeled — see below) |
-| **Standard** | ⚠️ *same series* | ✅ `STANDARD` | ❌ | ❌ |
-| **Half PPR** | ⚠️ *same series* | ❌ | ❌ | ❌ |
-| **Superflex** | ⚠️ *same series* | ✅ `SUPERFLEX` | ❌ | ❌ |
-| TE premium / 2QB / dynasty | ❌ | ❌ | ❌ | ❌ |
+| **PPR, 1QB** | ✅ | ✅ `PPR` | ✅ `adp_ppr` | ✅ (unlabeled — see below) |
+| **Standard** | ⚠️ *same series* | ✅ `STANDARD` | 📦 `adp_std` | ❌ |
+| **Half PPR** | ⚠️ *same series* | ❌ | 📦 `adp_half_ppr` | ❌ |
+| **Superflex** | ⚠️ *same series* | ✅ `SUPERFLEX` | 📦 `adp_2qb` | ❌ |
+| **Dynasty** (4 variants) | ❌ | ❌ | 📦 `adp_dynasty*` | ❌ |
+| **IDP / rookie** | ❌ | ❌ | 📦 `adp_idp*`, `adp_rookie` | ❌ |
+| TE premium | ❌ | ❌ | ❌ | ❌ |
+
+✅ published **and ingested** · 📦 published, **fetched daily, discarded at parse** · ⚠️ present but not format-specific · ❌ not published
+
+**ESPN projections were also mis-recorded here.** The `⚠️ same series` marks above are correct for ADP but say nothing about projected points, which *do* vary by format: ESPN serves Standard at `leaguedefaults/1`, PPR at `/3`, and Half-PPR at `/8`. Only `/3` is ingested. See [PLAN.md §0.1](./PLAN.md) for the corrected endpoint map.
 
 ### ⚠️ ESPN's ADP is a single global series
 
@@ -28,9 +34,39 @@ What *is* format-specific is `draftRanksByRankType`, which carries four variants
 
 **So for any non-PPR format, ESPN gives you ranks, not ADP** — the same rank-vs-ADP unit distinction as [PLAN.md §0.3](./PLAN.md). Don't let a superflex rank enter an ADP column.
 
-### Sleeper and Yahoo ADP are PPR/1QB only
+### Yahoo ADP is PPR/1QB only — Sleeper is not
 
-Originally probed against beatadp — `?scoring=HALF_PPR`, `?format=SUPERFLEX`, `?qb=SUPERFLEX`, `?teams=10` were **all ignored**, identical payload every time. That's still the practical constraint even now that Sleeper ADP comes from Sleeper's own endpoint directly: it exposes one series, no format parameter. Yahoo's `pub-api-ro` is the same shape — no scoring metadata in the response to select or even confirm against, so its ADP is captured as `YAHOO_DEFAULT` rather than asserted to be any specific format. **Sleeper and Yahoo ADP exist for PPR/1QB (Yahoo: presumed) and nothing else.**
+> ⚠️ **Corrected 2026-08-25.** This section previously claimed Sleeper "exposes one series, no format parameter" and that Sleeper and Yahoo ADP "exist for PPR/1QB and nothing else." That is true of Yahoo and **false of Sleeper**. The original probe was against beatadp, a third-party republisher of Sleeper's data, and the finding was carried forward unchanged when Sleeper's own API replaced it — the two are not the same surface.
+
+Originally probed against beatadp — `?scoring=HALF_PPR`, `?format=SUPERFLEX`, `?qb=SUPERFLEX`, `?teams=10` were **all ignored**, identical payload every time. That was a real constraint on *beatadp*.
+
+**Sleeper's own endpoint publishes twelve ADP series**, all in the single payload the daily ingest already fetches (verified in `data/bronze/sleeper/projections/2026-08-20`):
+
+```
+adp_ppr          adp_half_ppr     adp_std          adp_2qb
+adp_dynasty      adp_dynasty_ppr  adp_dynasty_std  adp_dynasty_half_ppr
+adp_dynasty_2qb  adp_idp          adp_idp_1qb      adp_rookie
+```
+
+Only `adp_ppr` is ingested. The other eleven are parsed past and discarded — deliberately, not by oversight; see the comment on `parseSleeperAdp` in [`src/ingest/sleeper-projections.ts`](./src/ingest/sleeper-projections.ts), which names the join-fanout risk that adding formats would create in `adp_current`.
+
+**Yahoo** is genuinely single-series: its `pub-api-ro` response carries no scoring metadata to select or even confirm against, so its ADP is captured as `YAHOO_DEFAULT` rather than asserted to be any specific format.
+
+#### How far apart the formats actually are
+
+Measured across the 154 players inside the draftable range (PPR ADP < 156, the cutoff `values` uses), from the 2026-08-20 capture:
+
+| vs PPR | median gap | p90 | max |
+|---|---|---|---|
+| Half-PPR | **3.8 picks** | 15.6 | 43.8 |
+| Standard | 6.9 picks | 26.1 | 69.6 |
+| 2QB (superflex) | 11.9 picks | 55.1 | 79.4 |
+
+Half-PPR sits inside normal day-to-day ADP drift — for practical purposes it *is* the PPR board. Standard moves the typical player about half a round, with a tail of roughly fifteen players moving two rounds or more. Superflex is a different board, which independently corroborates the ESPN superflex ranks above.
+
+⚠️ One day's snapshot, Sleeper only, and the `max` column is individual players who may be thin-sample. Enough to answer "does format move ADP"; not enough to build on.
+
+**Why this doesn't change the PPR pin on arbitrage.** The constraint is narrower than "no source publishes other formats" — it's that **ESPN and Yahoo** publish PPR only, so a three-source consensus can exist in PPR and nowhere else. Sleeper's superflex series alone can't produce a leave-one-out median; one source has nothing to be an outlier against. The pin stands, for a more specific reason than the one previously written here.
 
 ### ESPN's superflex ranks are real — and dramatic
 
@@ -147,7 +183,13 @@ The one real cost of not persisting: there's no history of how VORP or tiers mov
 
 **Scoring affects projections, not just replacement level.** ESPN's projections come from `leaguedefaults/3` and are PPR. For half-PPR/standard you must re-derive from component stats (receptions × delta) rather than reusing the PPR total. Half-PPR is *not* the midpoint of two rank lists.
 
-> **Still true, still unbuilt** (2026-08-25) — and it's the reason the config flag in §2 is less trivial than it looks. `LeagueConfigSchema` accepts `scoring: 'STD' | 'HALF' | 'PPR'`, but only PPR projections are ingested, and `values.ts` filters on `pr.scoring = <config scoring>`. So a `HALF` config wouldn't produce *wrong* numbers — it would match zero projection rows and produce an empty board. Any CLI config flag needs to either reject non-PPR scoring outright or re-derive projections from component stats first; silently accepting the flag is the one option that isn't safe.
+> **Half right, corrected 2026-08-25.** The re-derivation requirement is **wrong**: ESPN serves all three scorings natively (`/1` Standard, `/3` PPR, `/8` Half-PPR — see [PLAN.md §0.1](./PLAN.md)), so nothing needs deriving from component stats. Sleeper already ingests all three itself — `pts_ppr`, `pts_half_ppr`, `pts_std` — so `projections_current` holds ~634 HALF and ~633 STD rows today, at parity with PPR.
+>
+> What **is** still true is the trap: `LeagueConfigSchema` accepts `scoring: 'STD' | 'HALF' | 'PPR'`, and `values.ts` filters on `pr.scoring = <config scoring>`, but ESPN contributes PPR only — so in HALF or STD every player has one projection source, `values`' 2-source guard rejects all of them, and the board comes back **empty rather than wrong**. Silently accepting a scoring flag is still the one option that isn't safe.
+>
+> Closing that gap is roughly half a day: fetch `/1` and `/8` alongside `/3` (taking projections from all three but ADP and ranks from `/3` only — ADP is one global series, so writing it three times is the `adp_current` fanout bug), then thread `--scoring=` through `values` and `tiers`. Everything downstream is already scoring-general: `blendProjections` keys on `${playerId}|${scoring}`, and `replacement.ts`/`vorp.ts` consume whatever points they're handed.
+>
+> **Scoped and declined** (2026-08-25), so this stays documented rather than built. Measured on Sleeper's three scorings, position rank barely moves: QB is identical across all three, TE averages 1.3 spots, RB 2.15, WR 2.6. The real signal is about a dozen WR/RB — Rashee Rice WR12→WR24 in Standard, Mike Evans WR21→WR12 — which didn't justify taking REPORT.md from 254 lines to ~584, printing an identical QB board three times.
 
 ~~**The NL layer must know the user's league.**~~ **Moot — there is no NL layer** (see [PLAN.md §5](./PLAN.md)). The argument is kept because it transfers directly to the CLI, where it's still unresolved:
 

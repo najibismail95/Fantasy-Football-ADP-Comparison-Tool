@@ -40,7 +40,20 @@ Header: x-fantasy-filter: {"players":{"limit":300,"sortDraftRanks":{"sortPriorit
 ```
 
 `leaguedefaults/{N}` is the key — it gives a league-less default-scoring context. `3` = PPR.
-Enumerate `1`/`2`/`3` to capture standard / half-PPR / PPR separately.
+
+> ⚠️ **Corrected 2026-08-25.** This line originally read *"Enumerate `1`/`2`/`3` to capture standard / half-PPR / PPR separately."* **`/2` returns `GENERAL_NOT_FOUND`** — half-PPR is not there, and that error sent a later investigation to the wrong conclusion (that ESPN publishes no half-PPR at all). Probing `0`–`20` live gives the real map:
+>
+> | ID | Scoring |
+> |---|---|
+> | **`/1`** | **Standard** — Gibbs 297.07 |
+> | **`/3`** | **PPR** — Gibbs 364.86 |
+> | **`/8`** | **Half-PPR** — Gibbs 330.97 |
+> | `/5` `/6` `/7` `/9` | PPR duplicates, byte-identical to `/3` |
+> | `/0` `/2` `/4` `/10`+ | 404 |
+>
+> The three differ in **exactly one** input: points per reception (1.0 / 0.5 / 0.0). QB projections are byte-identical across all three (Josh Allen 369.67 in every one), and every gap equals the player's reception count — McBride's PPR-minus-Standard is 107.81 against 107.82 projected receptions. So `appliedTotal(/3) − 0.5 × stat[53] == appliedTotal(/8)` holds to the decimal, which makes a useful drift assertion if these are ever ingested.
+>
+> Only `/3` is ingested today. Multi-format scoring was scoped and **declined** — the payoff was about a dozen WR/RB whose position rank moves (QB doesn't move at all, TE barely), which didn't justify tripling the report. See [FORMATS.md §1](./FORMATS.md).
 
 Returns per player:
 - `ownership.averageDraftPosition` → **the ADP** (Gibbs 1.66, Bijan 2.58, Nacua 3.65)
