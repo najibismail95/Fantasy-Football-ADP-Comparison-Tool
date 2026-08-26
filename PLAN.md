@@ -2,12 +2,15 @@
 
 **Date:** 2026-07-26 · **Target season:** 2026 (drafts happening now — data is live)
 
-> **This is the original planning document, kept as-written.** It's background on *why* things were built the way they were, not a live description of the system today — for that, see [README.md](./README.md). The two biggest divergences from what's below:
+> **This is the original planning document, kept as-written.** It's background on *why* things were built the way they were, not a live description of the system today — for that, see [README.md](./README.md). The three biggest divergences from what's below:
 >
-> - **Sources changed.** beatadp (§0.2) and FantasyPros (§0.5, including expert rankings / ECR) were both replaced by **Yahoo's own API** after both scrapes broke in production. FantasyPros ECR has no key-free replacement, so that signal — §1's "Experts vs. market" — no longer exists. See [README.md — Data sources](./README.md#data-sources).
-> - **§5's natural-language layer was tried and dropped.** The system is CLI-only (`values`/`tiers`/`report`) by deliberate choice, not because §5 wasn't reached — see [README.md — Status](./README.md#status).
+> - **Sources changed.** beatadp (§0.2) and FantasyPros (§0.5, including expert rankings / ECR) were both replaced by **Yahoo's own API** after both scrapes broke in production. FantasyPros ECR has no key-free replacement, so that signal — §1's "Experts vs. market" — no longer exists. **nflverse** was added as a fourth source, feeding strength of schedule. See [README.md — Data sources](./README.md#data-sources).
+> - **§5's natural-language layer was tried and dropped.** The system is CLI-only (`values`/`tiers`/`sos`/`rising`/`report`) by deliberate choice, not because §5 wasn't reached — see [README.md — Status](./README.md#status).
+> - **The persisted-metrics schema below was never built.** §4 and §4.2 sketch `league_configs`, `replacement_levels`, and `metrics_gold` tables; none exist. Replacement levels and VORP are computed in-process per run rather than stored. The sections are annotated inline with what actually shipped.
 >
 > Everything else — the entity-resolution method (§0.6, §3, now [CROSSWALK.md](./CROSSWALK.md)), the analytical reasoning in §2, the format-vs-config split ([FORMATS.md](./FORMATS.md)) — still holds and matches the current implementation.
+>
+> *Audited against the codebase 2026-08-25; annotations below carry that date.*
 
 ---
 
@@ -37,7 +40,20 @@ Header: x-fantasy-filter: {"players":{"limit":300,"sortDraftRanks":{"sortPriorit
 ```
 
 `leaguedefaults/{N}` is the key — it gives a league-less default-scoring context. `3` = PPR.
-Enumerate `1`/`2`/`3` to capture standard / half-PPR / PPR separately.
+
+> ⚠️ **Corrected 2026-08-25.** This line originally read *"Enumerate `1`/`2`/`3` to capture standard / half-PPR / PPR separately."* **`/2` returns `GENERAL_NOT_FOUND`** — half-PPR is not there, and that error sent a later investigation to the wrong conclusion (that ESPN publishes no half-PPR at all). Probing `0`–`20` live gives the real map:
+>
+> | ID | Scoring |
+> |---|---|
+> | **`/1`** | **Standard** — Gibbs 297.07 |
+> | **`/3`** | **PPR** — Gibbs 364.86 |
+> | **`/8`** | **Half-PPR** — Gibbs 330.97 |
+> | `/5` `/6` `/7` `/9` | PPR duplicates, byte-identical to `/3` |
+> | `/0` `/2` `/4` `/10`+ | 404 |
+>
+> The three differ in **exactly one** input: points per reception (1.0 / 0.5 / 0.0). QB projections are byte-identical across all three (Josh Allen 369.67 in every one), and every gap equals the player's reception count — McBride's PPR-minus-Standard is 107.81 against 107.82 projected receptions. So `appliedTotal(/3) − 0.5 × stat[53] == appliedTotal(/8)` holds to the decimal, which makes a useful drift assertion if these are ever ingested.
+>
+> Only `/3` is ingested today. Multi-format scoring was scoped and **declined** on 2026-08-25 — the payoff was about a dozen WR/RB whose position rank moves (QB doesn't move at all, TE barely), which didn't justify tripling the report. Full decision record, with the measurements and the conditions that would reopen it: [FORMATS.md §5](./FORMATS.md#5-decision-record--multi-format-support-declined).
 
 Returns per player:
 - `ownership.averageDraftPosition` → **the ADP** (Gibbs 1.66, Bijan 2.58, Nacua 3.65)
@@ -180,7 +196,7 @@ FantasyPros **ADP** still comes from beatadp (verified real decimals). These pag
 
 ### 0.6 The ID crosswalk — was the biggest trap, now solved
 
-> ✅ **Resolved.** A tiered resolver reaches **100% / 99.8% / 99.4%** across beatadp, FantasyPros, and ESPN — 3 unmatched out of 1,195 rows, versus the 44% baseline documented below. Working implementation and full method: **[CROSSWALK.md](./CROSSWALK.md)** · [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs). The analysis below is retained as the reason it needed solving.
+> ✅ **Resolved.** A tiered resolver reaches **100% / 99.8% / 99.4%** across beatadp, FantasyPros, and ESPN — 3 unmatched out of 1,195 rows, versus the 44% baseline documented below. Working implementation and full method: **[CROSSWALK.md](./CROSSWALK.md)** · [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts). The analysis below is retained as the reason it needed solving.
 
 Sleeper's player dump carries `espn_id` / `yahoo_id` fields, which look like a free Rosetta Stone. Measured coverage among the 511 fantasy-relevant players (`search_rank < 400`, QB/RB/WR/TE):
 
@@ -237,16 +253,16 @@ You cannot subtract ESPN ADP from Sleeper ADP and call the result signal. Five c
 
 ### Value & bust metrics
 
-- **VORP**: projected points − replacement-level points at that position. **Replacement level is derived from the league config, never hardcoded** — greedy starter-fill over the projection pool gives QB10/RB23/WR27/TE10 in a 10-team 1-flex, but QB24 in a 12-team superflex. Working calculator: [`replacement-levels.mjs`](./replacement-levels.mjs); measured tables in [FORMATS.md §3](./FORMATS.md).
-- **Value score**: VORP-implied rank − actual ADP rank. Large positive = underpriced.
-- **Bust score**: the inverse, weighted by downside risk (age, injury history, target competition).
-- **Tiers**: cluster projected points per position and detect gaps. "Take the last guy in a tier before the cliff" is more actionable than a flat ranking, and it's how good drafters actually think.
+- **VORP**: projected points − replacement-level points at that position. **Replacement level is derived from the league config, never hardcoded** — greedy starter-fill over the projection pool gives QB10/RB23/WR27/TE10 in a 10-team 1-flex, but QB24 in a 12-team superflex. Shipped as [`src/metrics/replacement.ts`](./src/metrics/replacement.ts) and [`src/metrics/vorp.ts`](./src/metrics/vorp.ts); measured tables in [FORMATS.md §3](./FORMATS.md).
+- **Value score**: VORP-implied rank − actual ADP rank. Large positive = underpriced. Shipped as `values`, with four filters this section didn't anticipate — see [README.md](./README.md#what-it-finds) for why each one had to be added.
+- ~~**Bust score**: the inverse, weighted by downside risk (age, injury history, target competition).~~ **Never built** (2026-08-25). None of the three inputs named here are available: no source in the pipeline publishes injury history or target competition, and age would have to come from a birthdate field the `players` spine doesn't carry. What partially covers the same ground is `values`' side-by-side `espn_pts`/`sleeper_pts` columns — a wide gap between two independent projections is the closest thing to a downside-risk flag the current data supports, and §2 point 4 explains why it's shown raw rather than scored.
+- **Tiers**: cluster per position and detect gaps. "Take the last guy in a tier before the cliff" is more actionable than a flat ranking, and it's how good drafters actually think. ⚠️ Shipped clustering on **ADP, not projected points** as written here — points alone put every elite RB in a tier of one. See [README.md](./README.md#what-it-finds).
 
 ---
 
 ## 3. Entity resolution — ✅ solved
 
-Full method and measurements: **[CROSSWALK.md](./CROSSWALK.md)**. Implementation: [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) (TypeScript-ready, ~120 lines), later ported to `src/resolve/crosswalk.ts` — same mechanism, now resolving ESPN/Sleeper/Yahoo instead of the original ESPN/beatadp/FantasyPros.
+Full method and measurements: **[CROSSWALK.md](./CROSSWALK.md)**. Implementation: [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts) (~120 lines) — same mechanism the original spike prototyped, now resolving ESPN/Sleeper/Yahoo instead of ESPN/beatadp/FantasyPros.
 
 Measured against live data at the time: **beatadp 100.0% · FantasyPros 99.8% · ESPN 99.4%** — 3 unresolved out of 1,195 rows, from a 44% baseline. (Historical numbers — see CROSSWALK.md for why the mechanism transfers regardless of which sources feed it.)
 
@@ -268,10 +284,12 @@ What actually mattered wasn't better fuzzy matching but two structural fixes: **
 | Storage | **DuckDB + Parquet** (`@duckdb/node-api`) | Embedded, zero ops. See [STORAGE.md](./STORAGE.md) |
 | Dataframes | DuckDB SQL (+ `arquero` if needed) | The pipeline is SQL-shaped; pandas isn't missed |
 | Stats | `simple-statistics` + 25-line PAVA | `ckmeans` for tiering, hand-rolled isotonic. See §4.1 |
-| Fuzzy matching | `talisman` (Jaro-Winkler) | Already load-bearing in [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) |
-| API + UI | **Next.js** (route handlers + React) | API and UI in one deploy; shared types end to end |
-| LLM | `@anthropic-ai/sdk` | Zod 4's native `z.toJSONSchema()` declares each tool once for both runtime validation and the tool definition — no drift |
+| Fuzzy matching | `talisman` (Jaro-Winkler) | Load-bearing in [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts) |
+| ~~API + UI~~ | ~~**Next.js** (route handlers + React)~~ | **Never installed** — no app was built (§5) |
+| ~~LLM~~ | ~~`@anthropic-ai/sdk`~~ | **Never installed** — no tool-calling layer to define schemas for (§5) |
 | Schedule | GitHub Actions cron | Daily pulls |
+
+**Shipped dependency list** (2026-08-25) is shorter than the table above: `@duckdb/node-api`, `p-retry`, `simple-statistics`, `talisman`, `zod` — plus `tsx`/`typescript`/`@types/node` in dev. `arquero` was listed as an optional dataframe layer and never needed; DuckDB SQL covered it. Scripts run under `tsx`; `package.json` sets `engines.node >= 22`.
 
 ### 4.1 The one real gap, and why it's not a problem
 
@@ -284,9 +302,11 @@ Python's genuine advantage here is scipy/sklearn. In practice this pipeline need
 | Fuzzy name matching | `talisman` Jaro-Winkler |
 | Everything else | DuckDB SQL |
 
+⚠️ **Isotonic regression was never needed** (2026-08-25). Population-drift correction shipped as leave-one-out median instead (§2, point 3), so the one genuine scipy dependency never entered the codebase. The implementation is kept as reference in [STACK-TYPESCRIPT.md §1.3](./STACK-TYPESCRIPT.md), not in `src/`.
+
 **The decision fork, stated plainly:** this holds as long as you *consume* ESPN's projections. If you later want to **model projections yourself** — gradient boosting on historical stats, bayesian hierarchical models, opponent adjustments — Python wins decisively and there is no TS equivalent worth using. That would be a separate service, not a rewrite of this one.
 
-**The first component is already written in TypeScript** — [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) resolves 1,195 rows at 99.4–100% ([CROSSWALK.md](./CROSSWALK.md)). It ports into the pipeline as-is.
+**The first component was written in TypeScript** — the resolver reaches 99.4–100% on 1,195 rows ([CROSSWALK.md](./CROSSWALK.md)) and ported into the pipeline as `src/resolve/crosswalk.ts` unchanged.
 
 ### 4.2 Project structure
 
@@ -295,16 +315,19 @@ The planned layout below assumed a Next.js API + React UI and a `tools/` tool-ca
 ```
 fantasy-adp/
   src/
-    ingest/     espn.ts  sleeper.ts  sleeper-projections.ts  yahoo.ts
-    resolve/    crosswalk.ts  normalize.ts             # from crosswalk-resolver.mjs
-    metrics/    confidence.ts  league-config.ts  projections.ts
-                replacement.ts  rounds.ts  tiers.ts  vorp.ts
+    config.ts   types.ts                             # source endpoints, shared types
+    ingest/     espn.ts  sleeper.ts  sleeper-projections.ts  yahoo.ts  nflverse.ts
+    resolve/    crosswalk.ts  normalize.ts
+    metrics/    confidence.ts  grade.ts  league-config.ts  momentum.ts  projections.ts
+                replacement.ts  rounds.ts  sos.ts  tiers.ts  vorp.ts
     lib/        http.ts  bronze.ts  assert.ts  render.ts
     db/         schema.sql  client.ts
-    scripts/    daily-ingest.ts  report.ts  tiers.ts  values.ts
+    scripts/    daily-ingest.ts  report.ts  values.ts  tiers.ts  sos.ts  rising.ts
   data/         bronze/ silver/ gold/
   .github/workflows/  ingest.yml  ci.yml
 ```
+
+Added since this was written: `ingest/nflverse.ts` and `metrics/sos.ts` (strength of schedule), `metrics/momentum.ts` and `scripts/rising.ts` (ADP movement off the snapshot history), `metrics/grade.ts` (the A–F curve shared by `values` and `sos`), plus `config.ts`/`types.ts` at the root of `src/`. Tests live next to what they test as `*.test.ts` and run under `tsx --test`.
 
 No `app/`, no `schema/*.zod.ts` directory (validation lives inline in each ingest module instead), no `tools/`. Zod is still used (§4), just not for tool-calling schemas — there's no tool-calling layer to define them for.
 
@@ -322,6 +345,8 @@ data/
 Keeping bronze means an ESPN schema change costs you a reparse, not a re-collection. **ADP is a time series** — snapshot daily and never overwrite. That history is what powers "who's rising/falling," which is one of the most valuable features and is impossible to backfill if you don't start now. **Start collecting on day one, even before the analysis works.**
 
 ### Schema sketch
+
+> ⚠️ **Superseded.** [`src/db/schema.sql`](./src/db/schema.sql) is the live schema and the only authoritative version; it carries the reasoning for each table in comments. The sketch below is what was planned. Kept for the *asymmetry* argument under it, which still holds.
 
 ```sql
 players(player_id PK, full_name, position, team, birthdate, rookie_year)
@@ -342,7 +367,17 @@ metrics_gold(player_id, config_id, norm_adp_by_source, arb_gap_rounds,
              vorp, value_score, tier, computed_at)
 ```
 
-**The asymmetry is deliberate:** ADP/ECR rows carry the *source's* format; metrics carry the *user's* config. See [FORMATS.md §2](./FORMATS.md) — conflating the two is what limits a tool like this to one league type.
+**How the shipped schema differs** (2026-08-25):
+
+- **The bottom three tables don't exist.** `league_configs`, `replacement_levels`, and `metrics_gold` were never created. Replacement levels and VORP are recomputed in-process on every `values`/`tiers` run from `metrics/league-config.ts`'s `DEFAULT_CONFIG` — cheap enough (a few hundred players) that persisting them would add a staleness class of bug for no gain. Nothing is stored keyed by config.
+- **Three tables exist that aren't sketched here.** `rank_snapshots` (ESPN's per-format draft ranks — *not* ADP, kept separate for the §0.3 reason), `sos_ratings` (strength of schedule; deliberately **not** a time series, keyed by `(season, basis_season)` and replaced wholesale), and `unresolved` (crosswalk misses, surfaced rather than dropped — CROSSWALK.md's "absent from spine" policy).
+- **`players` carries different columns** — `display_name`, `espn_id`, `search_rank`, `active`, `captured_at`. No `birthdate` or `rookie_year`, which is why the bust score in §2 has no age input.
+- **`player_xref` persists `(player_id, source, source_id, source_name, resolve_tier, captured_at)`** — the resolve tier is stored, the fuzzy score isn't.
+- **`adp_snapshots` has no `sample_size`** — no source publishes one.
+- **`ecr_snapshots` is a frozen archive.** Nothing writes it since FantasyPros was dropped; it holds 2026-07-27..2026-08-16 and `ecr_current` is empty on a fresh database.
+- **`*_current` views were added** — `adp_current`, `projections_current`, and friends, each pinned to the latest `captured_at`. These matter more than they look: the tables are append-only, so an unscoped join across two capture dates silently returns duplicated rows rather than erroring, and an aggregate over them can come back half-right. The views exist so the safe query is the default one. See the comment block in `schema.sql`.
+
+**The asymmetry is deliberate:** ADP/ECR rows carry the *source's* format; metrics carry the *user's* config. See [FORMATS.md §2](./FORMATS.md) — conflating the two is what limits a tool like this to one league type. That split survived into the implementation even though the config-keyed tables didn't: the config is a runtime object rather than a stored row.
 
 Idempotency key: `(source, adp_format, capture_date)`. Re-running a day's ingest overwrites cleanly.
 
@@ -402,13 +437,17 @@ Claude parses *"Find me value QBs in the late rounds"* → `value_vs_projection(
 
 **Phase 1 — Ingestion + storage.** ✅ **Done, though not as planned.** beatadp (RSC parse) and FantasyPros both shipped, then both broke in production and were replaced by Yahoo's own API. ESPN direct API and Sleeper's player dump held up as designed. Bronze writes, daily cron, retry/backoff, schema validation — all in place; see [README.md — Automation](./README.md#automation).
 
-**Phase 2 — Entity resolution.** ✅ *Solved ahead of schedule — see [CROSSWALK.md](./CROSSWALK.md).* [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) was ported into the pipeline as `src/resolve/crosswalk.ts`, and the CI coverage gate (unresolved top-200 fails the ingest) is live in `daily-ingest.ts`. Was budgeted 2–3 days as a top schedule risk; that risk was retired, and stayed retired through a full source swap.
+**Phase 2 — Entity resolution.** ✅ *Solved ahead of schedule — see [CROSSWALK.md](./CROSSWALK.md).* The spike resolver was ported into the pipeline as [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts), and the CI coverage gate (unresolved top-200 fails the ingest) is live in `daily-ingest.ts`. Was budgeted 2–3 days as a top schedule risk; that risk was retired, and stayed retired through a full source swap.
 
 **Phase 3 — Normalization + metrics.** ✅ **Done, by a simpler route than planned.** Format-aware round conversion, VORP, tiers, and arbitrage gaps all shipped. Population-drift correction shipped as leave-one-out median rather than the planned isotonic regression (§2, point 3) — simpler, and sufficient with 3 real ADP sources. "Confidence intervals" shipped as direct per-source number comparison (§2, point 4) rather than a computed interval, after an earlier attempt at a single confidence *score* proved actively misleading.
 
 **Phase 4 — Query API + NL layer.** ❌ **Dropped.** Tried, then deliberately abandoned in favor of the CLI (§5's banner has the reasoning). No Next.js, no chat UI, no tool-calling loop.
 
-**Phase 5 — Stretch (ongoing).** ADP trend/momentum charts off the snapshot history ("who's rising") and auction-value mode remain unbuilt but are the more plausible next steps than reviving Phase 4 — the history to support "who's rising" has been accumulating since day one and is sitting in `data/silver/adp_snapshots.parquet` right now.
+**Phase 5 — Stretch.** ✅ **Done.** "Who's rising" — ADP trend/momentum off the snapshot history — shipped 2026-08-25 as `npm run rising`, built on the daily captures that had been accumulating in `data/silver/adp_snapshots.parquet` since day one. Two things shipped here that this plan never anticipated at all: **strength of schedule** (`npm run sos`), which added nflverse as a fourth source, and the **published daily report** (`REPORT.md` + the Actions job summary), which took over the job the dropped Phase 4 app was meant to do.
+
+Auction-value mode was also listed here and is **removed from the roadmap** (2026-08-25) — not deferred, not a decision. ESPN's and Yahoo's auction numbers still land in `adp_snapshots.auction_value` and `rank_snapshots.auction_value` on every run, since they arrive free in payloads already being parsed, so the history is there if that ever changes.
+
+**Nothing is queued after this point.** The phased plan is complete or deliberately closed at every step. Future work should start from [README.md](./README.md), not from this list.
 
 ---
 
@@ -436,5 +475,7 @@ Claude parses *"Find me value QBs in the late rounds"* → `value_vs_projection(
 1. ~~Scaffold the repo + write the two ingesters (ESPN direct, beatadp RSC parse).~~ Done — and the beatadp half was later replaced (see §7).
 2. ~~Wire the ingest-time assertion that rejects a rank series masquerading as ADP (§0.3).~~ Done, and since refined to scope the check to the top 300 by draft position (§7).
 3. ~~**Get the daily cron running this week.**~~ Running since 2026-07-27, with one real gap: 2026-08-14, when a false-positive from the assertion above (before it was scoped to top 300) failed a run that had genuinely healthy data. Everything else has been captured. See [README.md — Automation](./README.md#automation) for what the pipeline does now, including the failure-notification and history-loss guards added after that incident.
+
+The two root-level spike prototypes this document originally pointed at — `crosswalk-resolver.mjs` and `replacement-levels.mjs` — were **deleted on 2026-08-25**. Both had been dead for weeks: nothing imported them, and they read fixture files from a scratchpad directory that no longer exists, so neither could still run. Their logic lives in `src/resolve/crosswalk.ts` and `src/metrics/replacement.ts`, which is what every reference in these docs now points to. Recoverable from git history if the original spike form is ever wanted.
 
 For what to actually work on next, this list is no longer it — see [README.md](./README.md) and the open items there.

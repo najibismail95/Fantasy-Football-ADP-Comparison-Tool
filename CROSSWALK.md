@@ -1,6 +1,6 @@
 # Entity Resolution — Solved
 
-Answers [PLAN.md §0.6](./PLAN.md) ("the ID crosswalk is the biggest hidden trap"). Working implementation: [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs), later ported into [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts). All numbers below measured against live data on 2026-07-26, back when beatadp and FantasyPros were still ingested sources — both have since been replaced by Yahoo's own API (see [README.md](./README.md#data-sources)).
+Answers [PLAN.md §0.6](./PLAN.md) ("the ID crosswalk is the biggest hidden trap"). Working implementation: [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts) and [`src/resolve/normalize.ts`](./src/resolve/normalize.ts). All numbers below measured against live data on 2026-07-26, back when beatadp and FantasyPros were still ingested sources — both have since been replaced by Yahoo's own API (see [README.md](./README.md#data-sources)).
 
 The numbers are kept as historical validation of the *design*, not a claim about current sources: the mechanism described here — tiered resolution, name normalization, the team-join for defenses, the 0.92 fuzzy threshold — is exactly what `crosswalk.ts` still does today against ESPN, Sleeper, and Yahoo. Swapping a source has never required touching the resolver itself, only which raw fields feed into it.
 
@@ -96,7 +96,11 @@ Two distinct classes, each needing a policy decision rather than a better matche
 
 **Position disagreement (2).** Relax tier 3: when name+position fails, retry on name+**team** and log the position conflict. Takes ESPN to 100%. Cheap, and the log tells you when sources are drifting.
 
+> **Not implemented** (2026-08-25). `crosswalk.ts` still runs the four tiers as listed above — `team` → `id` → `exact` → `fuzzy`. The name+team retry was never added, because the `unresolved` table below turned out to cover the need: a tweener shows up there by name, which is enough to notice, and the CI gate only fails on a top-200 player. Worth revisiting if unresolved rows ever start clustering on position conflicts rather than genuine new players.
+
 **Absent from spine (1).** Nothing to match against. **Route these to an `unresolved` table and surface them — never drop them silently.** A player missing from your spine during draft season is exactly the rookie/UDFA case you most need to notice. Sleeper adds players fast, so most self-heal within a day.
+
+> ✅ **Shipped** as the `unresolved` table in [`src/db/schema.sql`](./src/db/schema.sql), exported to `data/silver/unresolved.parquet` and surfaced in `report`'s resolution-tier section. One subtlety worth knowing if you query it: `unresolved_current` is anchored to `adp_snapshots`' latest date, **not** its own — zero unresolved rows for a day is a normal, good outcome, and a self-referencing `MAX(captured_at)` would skip past those clean days to whatever stale rows came last. See the comment above the view.
 
 ---
 
@@ -106,7 +110,7 @@ Two distinct classes, each needing a policy decision rather than a better matche
 - **Track tier distribution over time.** A rise in `fuzzy` or `MISS` is the earliest signal a source changed its naming.
 - **Log every fuzzy match with its score** for spot-checking. At `fuzzy=0` today, any fuzzy hit is worth a look.
 - **Keep the threshold at 0.92.** Verified earlier that it cleanly separates true matches (`Kenneth Walker III` ~ `Kenneth Walker` = 0.956) from the dangerous same-surname false positive (`Josh Allen` ~ `Keenan Allen` = 0.589).
-- **`player_xref` spans four ID spaces** — yours, Sleeper's, ESPN's, and Yahoo's. Persist `(source, source_id, canonical_id, tier, score)` so every match is auditable after the fact.
+- **`player_xref` spans four ID spaces** — yours, Sleeper's, ESPN's, and Yahoo's, so every match stays auditable after the fact. Shipped as `(player_id, source, source_id, source_name, resolve_tier, captured_at)`: the resolve tier is persisted and the fuzzy *score* is not, since at `fuzzy=0` there is nothing to record — the score is logged at match time instead, which is where you'd want it the day that changes.
 
 ---
 
@@ -114,4 +118,4 @@ Two distinct classes, each needing a policy decision rather than a better matche
 
 PLAN.md §6 budgeted **2–3 days** for entity resolution as its own phase, and called it one of the two schedule risks. That was the right call given 44% coverage — but the problem is now solved and measured, and the implementation is ~120 lines.
 
-**Revised to half a day, and it held.** [`crosswalk-resolver.mjs`](./crosswalk-resolver.mjs) was ported into the ingest pipeline as `src/resolve/crosswalk.ts`, the overrides file (`normalize.ts`'s `ALIASES`) is in place, and the CI coverage gate is live in `daily-ingest.ts`. All of PLAN.md §6's phases 1–3 are done now — see [PLAN.md §6](./PLAN.md) for the full status, including the one that was dropped rather than completed.
+**Revised to half a day, and it held.** The spike resolver was ported into the ingest pipeline as [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts), the overrides file (`normalize.ts`'s `ALIASES`) is in place, and the CI coverage gate is live in `daily-ingest.ts`. All of PLAN.md §6's phases 1–3 are done now — see [PLAN.md §6](./PLAN.md) for the full status, including the one that was dropped rather than completed.
