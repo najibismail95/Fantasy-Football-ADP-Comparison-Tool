@@ -16,6 +16,18 @@ npm run rising RB 14      # who's rising/falling: ADP movement over N days
 
 `npm run ingest:dry` fetches and resolves without writing to the database — good for checking a source hasn't broken before it touches anything.
 
+Every position argument defaults sensibly, so a bare `npm run values` or `npm run sos` works. The full set of flags:
+
+| Flag | Command | What it does |
+|---|---|---|
+| `--all` | `tiers` | Include undrafted players, not just the drafted pool |
+| `--weight=0..1` | `tiers` | Blend projections into the tier boundaries. `0` (default) is pure ADP, `1` is pure projection — see [tiers](#what-it-finds) for why ADP wins by default |
+| `--markdown` | `report` `values` `sos` `rising` | Markdown tables instead of terminal box-drawing. The `:md` npm scripts (`npm run values:md`) are shorthand for this |
+| `--dry-run` | `ingest` | Fetch and resolve without writing — aliased as `npm run ingest:dry` |
+| `--refresh-sos` | `ingest` | Force strength of schedule to recompute. The daily run populates it once per season and then skips it — SOS is fixed once the schedule is out, so re-deriving it daily would spend ~11MB of nflverse CSV rewriting the same 256 rows. This flag is the way out when the cache can't know it's stale: nflverse correcting a stat line in the basis season, or a schedule change |
+
+> ⚠️ npm swallows bare `--all` as one of its own config flags. Both `npm run tiers RB --all` and the strictly-correct `npm run tiers RB -- --all` are honoured, because the first form silently produced a drafted-only board once and nothing errored.
+
 A GitHub Actions workflow runs `npm run ingest` daily and commits the day's Parquet back to the repo automatically — see [Automation](#automation) below. The commands above work identically against that history or a fresh local clone.
 
 ## What it finds
@@ -207,6 +219,11 @@ Storage is append-only and idempotent per capture date — re-running a day repl
 
 ## Status
 
-Ingest, entity resolution, and the metrics layer (VORP, tiers, cross-platform arbitrage) all work end to end and run daily on a schedule. `values`, `tiers`, and `report` are the interface — deliberately CLI-only, no web UI and no natural-language layer; an earlier direction toward a chat-style query interface was tried and dropped in favor of keeping this simple and scriptable.
+Ingest, entity resolution, and the metrics layer (VORP, tiers, strength of schedule, ADP momentum, cross-platform arbitrage) all work end to end and run daily on a schedule. `values`, `tiers`, `sos`, `rising`, and `report` are the interface — deliberately CLI-only, no web UI and no natural-language layer; an earlier direction toward a chat-style query interface was tried and dropped in favor of keeping this simple and scriptable.
+
+Everything the original build plan scoped is either done or deliberately closed — see [PLAN.md §6](./PLAN.md#6-phased-delivery). Two known gaps, both documented rather than hidden:
+
+- **The CLI is fixed to 12-team PPR, 1QB.** The metrics layer is genuinely config-general — hand `replacement.ts` a superflex config and it returns the right baselines — but no command takes a flag to do so, and only PPR projections are ingested, so a half-PPR config would return an empty board rather than a wrong one. [FORMATS.md §2](./FORMATS.md) has what a config flag would actually take.
+- **Computed metrics aren't persisted.** VORP and tiers are recomputed per run, so there's history of how *ADP* moved but not of how a player's value grade did. [FORMATS.md §4](./FORMATS.md) covers the tradeoff.
 
 Personal research tool. The sources are undocumented or unofficial — fine for private use, but check licensing before redistributing anything.

@@ -14,16 +14,19 @@ The pipeline is SQL-shaped plus about four statistical primitives — not machin
 
 ## 1. Verified library support
 
-| Need | Package | Version | Verified |
-|---|---|---|---|
-| Analytics DB | `@duckdb/node-api` | 1.5.5-r.2 | ✅ ran queries |
-| LLM tool-calling | `@anthropic-ai/sdk` | 0.115.0 | ✅ present |
-| Payload validation (Pydantic role) | `zod` | 4.4.3 | ✅ present |
-| Tiering / stats | `simple-statistics` | 7.9.3 | ✅ ran `ckmeans` |
-| Fuzzy name matching | `talisman` | 1.1.4 | ✅ ran Jaro-Winkler |
-| In-memory dataframe (optional) | `arquero` | 8.0.3 | ✅ present |
+| Need | Package | Version | Verified (2026-07-26) | In `package.json` today |
+|---|---|---|---|---|
+| Analytics DB | `@duckdb/node-api` | 1.5.5-r.2 | ✅ ran queries | ✅ |
+| Payload validation (Pydantic role) | `zod` | 4.4.3 | ✅ present | ✅ |
+| Tiering / stats | `simple-statistics` | 7.9.3 | ✅ ran `ckmeans` | ✅ |
+| Fuzzy name matching | `talisman` | 1.1.4 | ✅ ran Jaro-Winkler | ✅ |
+| HTTP retry/backoff | `p-retry` | — | *(added later)* | ✅ |
+| LLM tool-calling | `@anthropic-ai/sdk` | 0.115.0 | ✅ present | ❌ **never installed** |
+| In-memory dataframe (optional) | `arquero` | 8.0.3 | ✅ present | ❌ **never installed** |
 
-Node v24.11.1 is already installed. **This removes the Python 3.9.6 → 3.12 upgrade from the critical path.**
+The last two rows recorded what was *available* during the spike, not what the build committed to, and neither was ever added as a dependency (audited 2026-08-25). `@anthropic-ai/sdk` went with the natural-language layer (§7, [PLAN.md §5](./PLAN.md)) — dropped, so there are no tool schemas to declare. `arquero` was listed as optional from the start and stayed unnecessary: every dataframe operation in the pipeline is a DuckDB query, which is the outcome §1 predicted.
+
+Node v24.11.1 was the verification runtime. **This removes the Python 3.9.6 → 3.12 upgrade from the critical path.** `package.json` sets `engines.node >= 22` — the floor is 22, not 24, since nothing in the shipped code needs a 24-only API.
 
 ### 1.1 Tiering — `ckmeans` is better than the Python default
 
@@ -51,6 +54,8 @@ It found the tier cliff exactly where a human drafter would draw it.
 ```
 
 A threshold around **0.90**, applied *within* a `(position, team)` block, cleanly separates true matches from the dangerous same-surname false positive. This is the single most important correctness property in the whole system and TS handles it fine.
+
+> **Shipped at 0.92, blocked by position only** (`FUZZY_THRESHOLD` in [`src/resolve/crosswalk.ts`](./src/resolve/crosswalk.ts)) — team is used to break ties rather than to block, since a player who changed teams between two sources' snapshots would otherwise never be compared. It's also the tier that fires **zero times** in practice: normalizing names properly (CROSSWALK.md's fix #1) resolves everything before fuzzy matching is reached, so this is a safety net, not a load-bearing step.
 
 ### 1.3 Isotonic regression — 25 lines, no scipy needed
 
@@ -123,9 +128,9 @@ Moved to **[PLAN.md §4](./PLAN.md)** — that's the canonical version. This doc
 
 **Zod on untyped upstream payloads.** The ESPN response is a large, undocumented, drift-prone object. Zod's `.passthrough()`, `.catch()`, and discriminated unions let you pin down the ten fields you need while tolerating everything else, and fail loudly at the boundary when ESPN moves a field — which they already did once (`leagues/0` → `leaguedefaults`).
 
-**One language end to end.** Ingest scripts, metrics, API routes, tool definitions, and UI share types. The tool-call argument types and the React table props come from the same source. In the Python plan those are three separate type boundaries.
+**One language end to end.** Ingest scripts, metrics, and the report scripts share types (`src/types.ts`). The API routes, tool definitions, and React props this originally listed don't exist — there's no app — so the claim is narrower than written, but it still holds where it applies: a `LeagueConfig` is one Zod schema, validated at the boundary and typed through every metric that consumes it.
 
-**Tool-calling ergonomics.** Zod 4 has native `z.toJSONSchema()`, so a tool schema is declared once and used for both runtime validation and the Anthropic tool definition — no drift between what the model is told and what the function accepts.
+~~**Tool-calling ergonomics.**~~ **Moot** — no tool-calling layer was built, so `z.toJSONSchema()` is unused. Zod earns its place on the first point instead, which is where the real value turned out to be: pinning ten fields out of a large undocumented ESPN payload and failing loudly when the shape drifts.
 
 ---
 
@@ -161,4 +166,4 @@ This is near-zero cost, keeps the append-only snapshot history intact, and the i
 
 Moved to **[PLAN.md §4.2](./PLAN.md)**.
 
-Phasing is in [PLAN.md §6](./PLAN.md). Phases 1–3 are all done — entity resolution ([CROSSWALK.md](./CROSSWALK.md)), ingestion, and normalization/metrics. Phase 4 (the NL layer) was tried and dropped rather than completed; see PLAN.md §6 for the full picture.
+Phasing is in [PLAN.md §6](./PLAN.md). Phases 1–3 are done — entity resolution ([CROSSWALK.md](./CROSSWALK.md)), ingestion, and normalization/metrics. Phase 4 (the NL layer) was tried and dropped rather than completed. Phase 5's stretch work is done too: `sos` and `rising` shipped, and auction-value mode was removed from the roadmap rather than deferred.

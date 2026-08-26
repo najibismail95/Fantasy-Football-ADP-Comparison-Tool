@@ -1,6 +1,8 @@
 # League Formats & Strategy
 
-Extends the [PLAN.md §0](./PLAN.md) spike. All findings measured live on 2026-07-26. Working calculator: [`replacement-levels.mjs`](./replacement-levels.mjs).
+Extends the [PLAN.md §0](./PLAN.md) spike. All findings measured live on 2026-07-26. Working calculator: [`src/metrics/replacement.ts`](./src/metrics/replacement.ts).
+
+> **§1–§3 describe the shipped system. §4 does not** — it proposes a persisted config schema and an NL layer, neither of which was built. See the banner on §4. *Audited 2026-08-25.*
 
 The original plan pinned one canonical format (12-team PPR 1QB) and treated format as a tag on ADP rows. That's too thin: format doesn't just shift prices, **it changes which strategy is correct**. This document reworks the model around that.
 
@@ -76,6 +78,10 @@ type LeagueConfig = {
 };
 ```
 
+✅ **Shipped essentially verbatim** as `LeagueConfigSchema` in [`src/metrics/league-config.ts`](./src/metrics/league-config.ts) — a Zod schema rather than a bare type, so a config is validated at the boundary like any source payload, with `starters` defaulting to 1QB/2RB/2WR/1TE/1FLEX/1K/1DST.
+
+⚠️ **But there is no way to set one from the CLI** (2026-08-25). Every script — `values`, `tiers`, `sos`, `rising` — imports `DEFAULT_CONFIG` (12-team PPR, 1QB) and uses it unchanged; no flag overrides it. So the claim in the table above is precise but easy to over-read: the **metrics layer** genuinely works for any config you can describe, and `replacement.ts` will correctly return QB24 for a superflex config if you hand it one. Nothing hands it one. Making superflex or 10-team actually reachable is a CLI flag threaded through four scripts, not new analysis — the arithmetic underneath is already config-general and tested.
+
 ---
 
 ## 3. Testing your strategy hypothesis
@@ -119,6 +125,8 @@ Two things worth internalizing:
 
 ## 4. What this changes in the build
 
+> ⚠️ **This section is a proposal that was not implemented as written.** The *reasoning* held and drove the design; the *mechanism* did not. Each part is annotated below with what actually shipped. Audited 2026-08-25.
+
 **Schema** — replace the flat `formats` table:
 
 ```sql
@@ -131,14 +139,26 @@ adp_snapshots(player_id, source, adp_format, adp, ...)             -- source's o
 
 Note `metrics_gold` is keyed by **config**, while `adp_snapshots` is keyed by the **source's** format. That asymmetry is the split from §2 made concrete.
 
+**What shipped instead:** only the last line. `adp_snapshots` exists and is keyed by the source's own format exactly as written. The first three tables were never created — there is no `league_configs`, no `replacement_levels`, no `metrics_gold` in [`src/db/schema.sql`](./src/db/schema.sql).
+
+The asymmetry survived anyway, in a different shape: the config is a **runtime object, not a stored row**, and everything keyed by it is recomputed per run rather than persisted. For a few hundred players that costs milliseconds, and it removes a whole class of bug — a stored `replacement_levels` row goes stale the moment projections update, and nothing in a daily pipeline would tell you it had. Persisting metrics only pays off once something needs to read them without recomputing, which for a CLI that recomputes in under a second is not yet true.
+
+The one real cost of not persisting: there's no history of how VORP or tiers moved over the season, only how *ADP* moved (`rising` reads `adp_snapshots`). Recovering that later means either backfilling from the projection history — which *is* captured, in `projections` — or starting to store computed metrics from that day forward.
+
 **Scoring affects projections, not just replacement level.** ESPN's projections come from `leaguedefaults/3` and are PPR. For half-PPR/standard you must re-derive from component stats (receptions × delta) rather than reusing the PPR total. Half-PPR is *not* the midpoint of two rank lists.
 
-**The NL layer must know the user's league.** This is the biggest product consequence. *"Find me value QBs in the late rounds"* has genuinely different answers in 1QB vs superflex — the same player is a reach in one and a steal in the other. Three options, in order of preference:
+> **Still true, still unbuilt** (2026-08-25) — and it's the reason the config flag in §2 is less trivial than it looks. `LeagueConfigSchema` accepts `scoring: 'STD' | 'HALF' | 'PPR'`, but only PPR projections are ingested, and `values.ts` filters on `pr.scoring = <config scoring>`. So a `HALF` config wouldn't produce *wrong* numbers — it would match zero projection rows and produce an empty board. Any CLI config flag needs to either reject non-PPR scoring outright or re-derive projections from component stats first; silently accepting the flag is the one option that isn't safe.
 
-1. **Store a league config per user** and apply it silently. Best UX.
-2. **Ask once at session start**, then remember it.
-3. **Default to 12-team PPR 1QB and state the assumption in every answer** — the current plan's behavior, and the weakest, because a superflex user gets confidently wrong answers.
+~~**The NL layer must know the user's league.**~~ **Moot — there is no NL layer** (see [PLAN.md §5](./PLAN.md)). The argument is kept because it transfers directly to the CLI, where it's still unresolved:
 
-Add `leagueConfig` to every tool signature, and surface unsupported combinations honestly: *"Sleeper ADP isn't available for superflex — showing ESPN superflex ranks and config-derived VORP instead."*
+> *"Find me value QBs in the late rounds"* has genuinely different answers in 1QB vs superflex — the same player is a reach in one and a steal in the other. Three options, in order of preference:
+>
+> 1. **Store a league config per user** and apply it silently. Best UX.
+> 2. **Ask once at session start**, then remember it.
+> 3. **Default to 12-team PPR 1QB and state the assumption in every answer** — the weakest, because a superflex user gets confidently wrong answers.
+
+**The CLI landed on option 3**, and does the "state the assumption" half properly — every command prints its league line (`league: 12-team PPR, 1QB/2RB/2WR/1TE/1FLEX`) and its replacement levels above the table, so the frame is never implicit. What it can't do is the other half: there's no flag to change the config, so a superflex drafter can *see* that the numbers are 1QB but can't ask for anything else. See the note in §2.
 
 **Coverage caveat on the numbers above.** The 342-player projection pool is ESPN's top 350; QB and TE depth (49/50) is adequate for 12-team superflex (QB24) but thin for deeper configs. Production should pull a wider projection set before computing replacement levels for 14-team or deep-bench formats.
+
+> **Unchanged, and still the binding constraint** (2026-08-25). `src/config.ts` still requests ESPN's top 350. What did change is that projections are now **blended across ESPN and Sleeper** (`metrics/projections.ts`), which deepened the pool without widening the ESPN request — Sleeper projects players ESPN's top 350 cuts off. It also fixed a separate problem: ESPN alone compresses the middle of every position so hard that six startable RBs land within a projected point of each other, which makes tiering and grading meaningless regardless of pool depth. The blend is load-bearing, not a redundancy.
