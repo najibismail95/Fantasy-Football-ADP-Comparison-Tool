@@ -2,7 +2,15 @@
 
 Pulls Average Draft Position from ESPN, Sleeper, and Yahoo, reconciles them onto one player identity, and surfaces where the platforms disagree — so you can find players who are systematically cheaper wherever you happen to be drafting.
 
-CLI only. No API keys, no accounts, nothing to configure.
+## See it without cloning anything
+
+**[REPORT.md](./REPORT.md)** is regenerated every morning by an automated ingest and renders as an ordinary page right here on GitHub — cross-platform arbitrage, value board, tiers, and strength of schedule, already computed. Nothing to install, nothing to click; it stays current on its own schedule.
+
+![Cross-platform arbitrage table from REPORT.md — players ESPN prices noticeably cheaper or more expensive than Sleeper and Yahoo agree on](docs/img/arbitrage-example.png)
+
+The table above is straight from REPORT.md, not a mockup — that's the actual daily output. Want a specific day instead of the latest? **Actions tab → "Daily ADP ingest" → any run → Summary** (works signed into any GitHub account; logged out, use REPORT.md).
+
+Only clone this if you want to run your own queries against it — different round ranges, different rising windows, offline. That's everything below. CLI only, no API keys, no accounts, nothing to configure.
 
 ## Requirements
 
