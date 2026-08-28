@@ -33,12 +33,12 @@ Takes ~5-10s. After that, everything below works offline against the local datab
 
 | Command | What it gives you |
 |---|---|
+| `npm run ingest` | Fetch all sources → DuckDB + Parquet |
+| `npm run report` | Integrity checks, resolution quality, and cross-platform arbitrage |
 | `npm run values [POS] [MIN] [MAX]` | Value board — players whose projected production beats their draft slot. Defaults to rounds 4-10 |
-| `npm run tiers [POS]` | Positional tiers clustered by ADP, with the point cliff between them |
 | `npm run sos [POS]` | Strength of schedule — the 5 easiest and 5 hardest playoff draws |
 | `npm run rising [POS] [DAYS]` | ADP movement over the last `DAYS` (default 7). A lone number is `DAYS`: `npm run rising 14` |
-| `npm run report` | Integrity checks, resolution quality, and cross-platform arbitrage |
-| `npm run ingest` | Fetch all sources → DuckDB + Parquet |
+| `npm run tiers [POS]` | Positional tiers clustered by ADP, with the point cliff between them |
 | `npm run verify:capture` | Assert today's ADP reached the committed history. Run by CI after each ingest |
 
 Position defaults to all (or QB for `tiers`), so a bare `npm run values` works.
