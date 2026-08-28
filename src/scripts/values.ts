@@ -1,4 +1,4 @@
-import { openDb } from '../db/client.js';
+import { openDb, assertHydrated } from '../db/client.js';
 import { DEFAULT_CONFIG, type LeagueConfig } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
 import { computeVorp, computeValueScore, gradeValueScores, qualifiesForValueBoard } from '../metrics/vorp.js';
@@ -47,6 +47,8 @@ const roundMax = maxArg ? Number(maxArg) : 10;
 
 const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
+
+await assertHydrated(conn, ['adp_snapshots', 'projections', 'players']);
 
 // Blended across ESPN + Sleeper ONLY. Yahoo has no third projection to add
 // here — checked directly: its public pub-api-ro endpoint carries no points

@@ -1,4 +1,4 @@
-import { openDb } from '../db/client.js';
+import { openDb, assertHydrated } from '../db/client.js';
 import { DEFAULT_CONFIG } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
 import { computeTiers, compositeScore } from '../metrics/tiers.js';
@@ -69,6 +69,8 @@ const TARGET_PER_TIER = 3.5;
 
 const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
+
+await assertHydrated(conn, ['adp_snapshots', 'projections', 'players']);
 
 const cfg = DEFAULT_CONFIG;
 

@@ -1,10 +1,12 @@
-import { openDb } from '../db/client.js';
+import { openDb, assertHydrated } from '../db/client.js';
 import { detectCensoring } from '../lib/assert.js';
 import { heading, note, table, MARKDOWN } from '../lib/render.js';
 
 /** Sanity + first-look queries over the ingested data. `npm run report` */
 const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
+
+await assertHydrated(conn, ['adp_snapshots', 'players']);
 
 /**
  * Detect a censoring ceiling per source, rather than hardcoding ESPN's — the

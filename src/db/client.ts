@@ -282,3 +282,43 @@ export async function hydrateFromParquet(
   }
   return loaded;
 }
+
+/**
+ * Stop a read command that has nothing to read.
+ *
+ * openDb() CREATES the database if it isn't there, so a fresh clone that skips
+ * `npm run ingest` doesn't get an error — it gets an empty one, and every
+ * query below returns zero rows. The commands then render that as a perfectly
+ * well-formed empty board sitting under "an empty section means there's no
+ * real value in that range, not a bug", and replacement levels of "0 pts".
+ * Both statements are false here, and they point a new user at the data
+ * instead of at the missing setup step.
+ *
+ * sos.ts and rising.ts already refused this way; values/tiers/report did not.
+ * This is that same guard, shared, so the answer doesn't depend on which
+ * command you happened to type first.
+ *
+ * Checks emptiness rather than file existence on purpose: a half-finished
+ * ingest, or one whose sources all failed, leaves the file on disk and is the
+ * same dead end for the reader.
+ */
+export async function assertHydrated(
+  conn: DuckDBConnection,
+  tables: readonly string[],
+): Promise<void> {
+  const empty: string[] = [];
+  for (const t of tables) {
+    const rows = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${t}`);
+    const n = Number((rows.getRowObjectsJson() as { n: string | number }[])[0]?.n ?? 0);
+    if (n === 0) empty.push(t);
+  }
+  if (empty.length === 0) return;
+
+  console.error(
+    `\nno data in the local database (${empty.join(', ')} ${empty.length === 1 ? 'is' : 'are'} empty).\n\n` +
+      `Run \`npm run ingest\` first — it rebuilds the database from the committed\n` +
+      `history in data/silver/ and fetches today's numbers. The report commands\n` +
+      `read the database, they don't populate it.\n`,
+  );
+  process.exit(1);
+}
