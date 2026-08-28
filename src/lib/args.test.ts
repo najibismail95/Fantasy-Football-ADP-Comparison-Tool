@@ -1,0 +1,114 @@
+import { test, describe, beforeEach, afterEach } from 'node:test';
+import assert from 'node:assert/strict';
+import { parsePosition, parsePositiveNumber, POSITIONS } from './args.js';
+
+const USAGE = 'usage: npm run thing [POS]';
+
+/**
+ * These parsers report by exiting, so the failure path can't be asserted on
+ * without replacing process.exit — an uncaught one would take the test runner
+ * down with it. Swapped for a throw here so "did it reject?" is testable at
+ * all, and console.error captured so a passing run stays quiet.
+ */
+let exitCalls: number[];
+let errors: string[];
+const realExit = process.exit;
+const realError = console.error;
+
+beforeEach(() => {
+  exitCalls = [];
+  errors = [];
+  process.exit = ((code?: number) => {
+    exitCalls.push(code ?? 0);
+    throw new Error('EXIT');
+  }) as typeof process.exit;
+  console.error = (msg?: unknown) => void errors.push(String(msg));
+});
+
+afterEach(() => {
+  process.exit = realExit;
+  console.error = realError;
+});
+
+const rejects = (fn: () => unknown) => {
+  assert.throws(fn, /EXIT/, 'expected the parser to exit');
+  assert.deepEqual(exitCalls, [1], 'expected exit code 1');
+};
+
+describe('parsePosition', () => {
+  test('accepts every position the commands support', () => {
+    for (const pos of POSITIONS) {
+      assert.equal(parsePosition(pos, USAGE), pos);
+      assert.deepEqual(exitCalls, []);
+    }
+  });
+
+  test('is case-insensitive — `rising qb` has always worked', () => {
+    assert.equal(parsePosition('qb', USAGE), 'QB');
+    assert.equal(parsePosition('Rb', USAGE), 'RB');
+    assert.equal(parsePosition('def', USAGE), 'DEF');
+  });
+
+  test('undefined means "all positions", not an error', () => {
+    assert.equal(parsePosition(undefined, USAGE), undefined);
+    assert.deepEqual(exitCalls, []);
+  });
+
+  test('rejects a typo rather than filtering to nothing', () => {
+    // The bug this exists for: "ZZ" matched no rows and every command
+    // rendered that as its ordinary empty result.
+    rejects(() => parsePosition('ZZ', USAGE));
+    assert.match(errors.join('\n'), /unknown position "ZZ"/);
+  });
+
+  test('names the valid positions and the usage line when it rejects', () => {
+    rejects(() => parsePosition('RBB', USAGE));
+    const out = errors.join('\n');
+    for (const pos of POSITIONS) assert.match(out, new RegExp(pos));
+    assert.match(out, /usage: npm run thing/);
+  });
+
+  test('rejects a flag that leaked into the position slot', () => {
+    // Flags are stripped before parsing, but if that ever regresses the
+    // position filter must not silently become "--MARKDOWN".
+    rejects(() => parsePosition('--markdown', USAGE));
+  });
+
+  test('rejects the empty string rather than treating it as absent', () => {
+    rejects(() => parsePosition('', USAGE));
+  });
+});
+
+describe('parsePositiveNumber', () => {
+  test('returns the fallback when the argument is absent', () => {
+    assert.equal(parsePositiveNumber(undefined, 4, 'ROUND_MIN', USAGE), 4);
+    assert.deepEqual(exitCalls, []);
+  });
+
+  test('parses integers and decimals', () => {
+    assert.equal(parsePositiveNumber('7', 4, 'ROUND_MIN', USAGE), 7);
+    assert.equal(parsePositiveNumber('7.5', 4, 'ROUND_MIN', USAGE), 7.5);
+  });
+
+  test('rejects non-numeric input instead of silently dropping the filter', () => {
+    // The dangerous case: Number("foo") is NaN, every `x >= NaN` is false, so
+    // a range built from it matched everything and printed the full board.
+    rejects(() => parsePositiveNumber('foo', 4, 'ROUND_MIN', USAGE));
+    assert.match(errors.join('\n'), /ROUND_MIN must be a positive number, got "foo"/);
+  });
+
+  test('rejects zero and negatives', () => {
+    rejects(() => parsePositiveNumber('0', 7, 'DAYS', USAGE));
+    exitCalls = [];
+    rejects(() => parsePositiveNumber('-3', 7, 'DAYS', USAGE));
+  });
+
+  test('rejects Infinity, which is finite-looking to a naive check', () => {
+    rejects(() => parsePositiveNumber('Infinity', 4, 'ROUND_MIN', USAGE));
+  });
+
+  test('uses the caller label so the message names the real argument', () => {
+    rejects(() => parsePositiveNumber('nope', 7, 'DAYS', USAGE));
+    assert.match(errors.join('\n'), /DAYS must be/);
+  });
+});
