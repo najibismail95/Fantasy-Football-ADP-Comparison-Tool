@@ -23,12 +23,21 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
 
+    # package.json says node >=22 and the README tells people to run it on 22,
+    # but only 24 was ever tested — so the supported floor was a claim nothing
+    # checked. 22 is what a contributor on the current LTS will actually have;
+    # 24 is what the daily ingest runs on. Both have to pass.
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['22', '24']
+
     steps:
       - uses: actions/checkout@v4
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '24'
+          node-version: ${{ matrix.node }}
           cache: npm
 
       - run: npm ci
