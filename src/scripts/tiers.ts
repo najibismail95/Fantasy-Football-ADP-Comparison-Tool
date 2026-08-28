@@ -4,7 +4,7 @@ import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.
 import { computeTiers, compositeScore } from '../metrics/tiers.js';
 import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
-import { parsePosition } from '../lib/args.js';
+import { parsePosition, parseFraction } from '../lib/args.js';
 
 /**
  * "Take the last guy in a tier before the cliff" (PLAN.md §2) — for any
@@ -59,7 +59,12 @@ if (positional[1] !== undefined) {
  * Projections still drive VORP, value scores and replacement level. This
  * weight only affects how the tier BOUNDARIES are drawn for display.
  */
-const ADP_WEIGHT = weightArg ? Number(weightArg.split('=')[1]) : 0;
+const ADP_WEIGHT = parseFraction(
+  weightArg?.split('=')[1],
+  0,
+  '--weight',
+  `usage: npm run tiers ${pos} [--all] [--weight=0..1]`,
+);
 
 /**
  * Target players per tier. Tiers exist to answer "take this guy now or wait

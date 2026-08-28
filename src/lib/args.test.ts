@@ -1,6 +1,6 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePosition, parsePositiveNumber, splitPositionAndDays, POSITIONS } from './args.js';
+import { parsePosition, parsePositiveNumber, parseFraction, splitPositionAndDays, POSITIONS } from './args.js';
 
 const USAGE = 'usage: npm run thing [POS]';
 
@@ -147,5 +147,31 @@ describe('splitPositionAndDays', () => {
     // `rising 14 7` is nonsense; surfacing it as an unknown position is the
     // honest outcome, not silently reinterpreting the pair.
     assert.deepEqual(splitPositionAndDays(['14', '7']), ['14', '7']);
+  });
+});
+
+describe('parseFraction', () => {
+  test('returns the fallback when absent', () => {
+    assert.equal(parseFraction(undefined, 0, '--weight', USAGE), 0);
+    assert.deepEqual(exitCalls, []);
+  });
+
+  test('accepts both ends and the middle of the scale', () => {
+    assert.equal(parseFraction('0', 0, '--weight', USAGE), 0);
+    assert.equal(parseFraction('1', 0, '--weight', USAGE), 1);
+    assert.equal(parseFraction('0.5', 0, '--weight', USAGE), 0.5);
+  });
+
+  test('rejects above 1 rather than clamping behind a header that says 200%', () => {
+    rejects(() => parseFraction('2', 0, '--weight', USAGE));
+    assert.match(errors.join('\n'), /--weight must be between 0 and 1, got "2"/);
+  });
+
+  test('rejects negatives', () => {
+    rejects(() => parseFraction('-1', 0, '--weight', USAGE));
+  });
+
+  test('rejects non-numeric — this is what printed "NaN% projection"', () => {
+    rejects(() => parseFraction('abc', 0, '--weight', USAGE));
   });
 });

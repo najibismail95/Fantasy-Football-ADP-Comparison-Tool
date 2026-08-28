@@ -90,3 +90,29 @@ export function splitPositionAndDays(
   }
   return [first, positional[1]];
 }
+
+/**
+ * A fraction in [0, 1], or exit.
+ *
+ * `tiers --weight` fed its raw value straight into the header line while
+ * compositeScore quietly clamped it to [0,1] for the actual maths. The two
+ * disagreed, so the output described a computation that had not happened:
+ * `--weight=2` printed "200% projection / -100% ADP" and `--weight=abc`
+ * printed "NaN% projection / NaN% ADP", both above tiers built with a
+ * perfectly valid clamped weight. Rejecting up front is better than clamping
+ * silently — the user asked for something the scale does not have.
+ */
+export function parseFraction(
+  raw: string | undefined,
+  fallback: number,
+  label: string,
+  usage: string,
+): number {
+  if (raw === undefined) return fallback;
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0 || n > 1) {
+    console.error(`\n${label} must be between 0 and 1, got "${raw}".\n${usage}\n`);
+    process.exit(1);
+  }
+  return n;
+}
