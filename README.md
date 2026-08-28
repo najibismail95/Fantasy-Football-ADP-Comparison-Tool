@@ -31,6 +31,7 @@ Takes ~5-10s. After that, everything below works offline against the local datab
 | `npm run rising [POS] [DAYS]` | ADP movement over the last `DAYS` (default 7). A lone number is `DAYS`: `npm run rising 14` |
 | `npm run report` | Integrity checks, resolution quality, and cross-platform arbitrage |
 | `npm run ingest` | Fetch all sources → DuckDB + Parquet |
+| `npm run verify:capture` | Assert today's ADP reached the committed history. Run by CI after each ingest |
 
 Position defaults to all (or QB for `tiers`), so a bare `npm run values` works.
 
@@ -129,6 +130,10 @@ Both come from `npm run report:md`, `rising:md`, `values:md`, `sos:md` run in th
 ### When it breaks
 
 A missed day is a permanent hole, so a failed run opens a GitHub issue (reusing one open issue rather than filing daily) and attaches the raw payloads as an artifact for 14 days — usually enough to tell a source outage from a parser that needs updating.
+
+After committing, the run asserts that today's date is actually present in `data/silver/adp_snapshots.parquet` (`npm run verify:capture`). A crash was always visible; a run that finished *cleanly having captured nothing* was not — the commit step exits successfully when there's nothing to commit, so it showed up green and silent. The check deliberately asks whether today is in the history rather than whether anything changed, because nothing changing is legitimate: run the workflow twice in a row and the second run correctly commits nothing, still has today's date, and passes quietly.
+
+It runs after the commit, never before — an alarm shouldn't be able to stop the thing it's watching from being saved.
 
 The ingest also refuses to export a Parquet that would drop capture dates already committed.
 

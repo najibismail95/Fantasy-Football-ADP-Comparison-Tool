@@ -91,6 +91,28 @@ jobs:
           git pull --rebase --autostash origin main
           git push
 
+      # Deliberately AFTER the commit, never before it.
+      #
+      # This step's whole job is to raise an alarm, and an alarm must not be
+      # able to destroy what it is watching. Run before the commit, a bug here
+      # would stop a perfectly good capture from being saved — the same reason
+      # "Build report" is continue-on-error. Whatever the ingest managed to
+      # write is committed first; this then decides whether to shout.
+      #
+      # Closes the one gap the failure step below could not see. It fires on
+      # `if: failure()`, so it catches a run that CRASHED — but the commit step
+      # above exits 0 when there is nothing to commit, so a run that finished
+      # cleanly and captured nothing was green, silent, and indistinguishable
+      # in the Actions tab from a run that saved the day properly.
+      #
+      # Note this asks whether TODAY IS IN THE HISTORY, not whether anything
+      # changed. Nothing changing is legitimate — trigger this workflow twice
+      # in a row and the second run correctly commits nothing. That re-run
+      # still has today's date, so it passes quietly; only a run that actually
+      # captured nothing fails, and failing trips the issue step below.
+      - name: Verify today was captured
+        run: npm run -s verify:capture
+
       # A failed run is not just a red X — daily ADP cannot be backfilled, so
       # every day this silently fails is a permanent hole in the history. That
       # is exactly how 2026-08-14 was lost: the run failed, nobody was watching

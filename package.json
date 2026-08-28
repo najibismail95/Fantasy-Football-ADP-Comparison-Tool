@@ -8,6 +8,7 @@
   },
   "scripts": {
     "ingest": "tsx src/scripts/daily-ingest.ts",
+    "verify:capture": "tsx src/scripts/verify-capture.ts",
     "ingest:dry": "tsx src/scripts/daily-ingest.ts --dry-run",
     "typecheck": "tsc --noEmit",
     "report": "tsx src/scripts/report.ts",
