@@ -52,7 +52,7 @@ if (roundMin > roundMax) {
   process.exit(1);
 }
 
-const conn = await openDb();
+const conn = await openDb('fantasy.duckdb', { readonly: true });
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
 
 await assertHydrated(conn, ['adp_snapshots', 'projections', 'players']);

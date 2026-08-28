@@ -274,3 +274,66 @@ describe('export history guard', () => {
     await assert.rejects(() => exportParquet(c2, 'players', DIR2), /refusing to export/);
   });
 });
+
+/**
+ * Read-only opening is what lets two commands run at the same time. Before it,
+ * every command took DuckDB's exclusive write lock — including the five that
+ * only SELECT — so a second terminal got a driver error naming a PID and a
+ * lock file.
+ */
+describe('openDb readonly', () => {
+  const RO_DB = `test-ro-${process.pid}.duckdb`;
+  const roPath = path.join(GOLD, RO_DB);
+
+  before(async () => {
+    // Build it read-write first: readonly deliberately cannot create a schema.
+    const rw = await openDb(RO_DB);
+    await replaceDay(rw, 'adp_snapshots', [...ADP_COLS], adpRows('2026-08-01', 5), '2026-08-01');
+    await rw.disconnectSync();
+  });
+
+  after(async () => {
+    await fs.rm(roPath, { force: true });
+    await fs.rm(`${roPath}.wal`, { force: true });
+  });
+
+  test('reads an existing database', async () => {
+    const c = await openDb(RO_DB, { readonly: true });
+    const n = Number(
+      ((await c.runAndReadAll('SELECT count(*) AS n FROM adp_snapshots')).getRowObjectsJson() as { n: string }[])[0]!.n,
+    );
+    assert.equal(n, 5);
+    await c.disconnectSync();
+  });
+
+  test('the schema views exist without being recreated', async () => {
+    // readonly skips schema.sql entirely, so the views have to already be
+    // there from the ingest that built the file.
+    const c = await openDb(RO_DB, { readonly: true });
+    await assert.doesNotReject(() => c.runAndReadAll('SELECT count(*) FROM adp_current'));
+    await c.disconnectSync();
+  });
+
+  test('several readonly connections coexist — the point of the mode', async () => {
+    const conns = await Promise.all([
+      openDb(RO_DB, { readonly: true }),
+      openDb(RO_DB, { readonly: true }),
+      openDb(RO_DB, { readonly: true }),
+    ]);
+    const counts = await Promise.all(
+      conns.map(async (c) =>
+        Number(
+          ((await c.runAndReadAll('SELECT count(*) AS n FROM adp_snapshots')).getRowObjectsJson() as { n: string }[])[0]!.n,
+        ),
+      ),
+    );
+    assert.deepEqual(counts, [5, 5, 5]);
+    for (const c of conns) await c.disconnectSync();
+  });
+
+  test('a readonly connection cannot write', async () => {
+    const c = await openDb(RO_DB, { readonly: true });
+    await assert.rejects(() => c.run(`INSERT INTO adp_snapshots (player_id) VALUES ('nope')`));
+    await c.disconnectSync();
+  });
+});

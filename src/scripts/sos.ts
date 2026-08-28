@@ -19,7 +19,7 @@ import { parsePosition } from '../lib/args.js';
 const [posArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
 const posFilter = parsePosition(posArg, 'usage: npm run sos [POS]');
 
-const conn = await openDb();
+const conn = await openDb('fantasy.duckdb', { readonly: true });
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
 
 const seasonRow = (await q('SELECT max(season) AS s, any_value(basis_season) AS b FROM sos_ratings')) as {

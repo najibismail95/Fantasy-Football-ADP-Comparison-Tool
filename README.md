@@ -28,7 +28,7 @@ Takes ~5-10s. After that, everything below works offline against the local datab
 | `npm run values [POS] [MIN] [MAX]` | Value board — players whose projected production beats their draft slot. Defaults to rounds 4-10 |
 | `npm run tiers [POS]` | Positional tiers clustered by ADP, with the point cliff between them |
 | `npm run sos [POS]` | Strength of schedule — the 5 easiest and 5 hardest playoff draws |
-| `npm run rising [POS] [DAYS]` | ADP movement over the last `DAYS` (default 7) |
+| `npm run rising [POS] [DAYS]` | ADP movement over the last `DAYS` (default 7). A lone number is `DAYS`: `npm run rising 14` |
 | `npm run report` | Integrity checks, resolution quality, and cross-platform arbitrage |
 | `npm run ingest` | Fetch all sources → DuckDB + Parquet |
 
@@ -94,6 +94,8 @@ Two tables per position, easiest and hardest, one row per team.
 
 A player needs ESPN plus one other source to appear. `—` means that source has no valid data over the window — for Yahoo it often means the window predates its history, so try a shorter one. K/DEF are excluded.
 
+`DAYS` can't exceed the collected history — ask for more and it says so, and tells you the longest window available rather than returning a blank board. That ceiling rises by one day per ingest.
+
 ### report
 
 Cross-platform arbitrage by leave-one-out median: a source is flagged as the outlier only when the other two independently agree within 25 picks. Each source's ADP is shown raw so you can see who agrees. Also checks that each ADP series still looks like a real average rather than a leaked rank column, and reports resolution quality per source.
@@ -147,6 +149,8 @@ data/
 ```
 
 Storage is append-only and idempotent per capture date: re-running a day replaces it rather than duplicating.
+
+The report commands open the database read-only, so you can run as many of them at once as you like — separate terminals, side-by-side comparisons. Only `ingest` takes a write lock, and only for the few seconds it runs; anything started during that window says so and asks you to retry rather than failing with a driver error.
 
 > The snapshot tables are append-only, so query the `*_current` views (`adp_current`, `projections_current`, …) unless you specifically want history. An unscoped query doesn't error — it silently returns several days of duplicated rows. See the comment block in `src/db/schema.sql`.
 

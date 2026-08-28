@@ -3,7 +3,7 @@ import { DEFAULT_CONFIG } from '../metrics/league-config.js';
 import { detectCensoring } from '../lib/assert.js';
 import { computeMomentum, selectMomentum, type SnapshotRow, type MomentumResult } from '../metrics/momentum.js';
 import { heading, note, table, MARKDOWN } from '../lib/render.js';
-import { parsePosition } from '../lib/args.js';
+import { parsePosition, splitPositionAndDays } from '../lib/args.js';
 
 /**
  * "Who's rising?" — ADP movement over the last N days, per source.
@@ -20,8 +20,10 @@ import { parsePosition } from '../lib/args.js';
  * report.ts's arbitrage table and values.ts already use.
  */
 
-const [posArg, daysArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const usage = 'usage: npm run rising [POS] [DAYS]';
+const positional = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+// A lone number is DAYS — see splitPositionAndDays.
+const [posArg, daysArg] = splitPositionAndDays(positional);
+const usage = 'usage: npm run rising [POS] [DAYS]   (a lone number is DAYS: `rising 14`)';
 const posFilter = parsePosition(posArg, usage);
 const days = daysArg ? Number(daysArg) : 7;
 // A bad value here isn't a graceful "no results" — it's a raw DuckDB
@@ -34,13 +36,47 @@ if (!Number.isFinite(days) || days <= 0) {
 }
 
 const cfg = DEFAULT_CONFIG;
-const conn = await openDb();
+const conn = await openDb('fantasy.duckdb', { readonly: true });
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
 
 const nowDateRow = (await q('SELECT max(captured_at) AS d FROM adp_snapshots')) as { d: string | null }[];
 const nowDate = nowDateRow[0]?.d;
 if (!nowDate) {
   console.error('no ADP snapshots in the database yet — run `npm run ingest` first.');
+  process.exit(1);
+}
+
+/**
+ * Refuse a window that reaches back past the start of the history.
+ *
+ * Each source's "then" endpoint is the newest date at or before
+ * `nowDate - days`. Ask for more days than exist and that lookup matches
+ * nothing for EVERY source, so every source returns empty and the board comes
+ * out blank — under the full explanatory note, formatted exactly like a real
+ * answer. Measured on a 32-day history: `rising WR 32` returned 28 rows and
+ * `rising WR 33` returned zero, with nothing on screen to say the window was
+ * the problem rather than a quiet month.
+ *
+ * The bound is computed, never hardcoded: it grows by one every day the
+ * ingest runs, and a hardcoded number would start lying tomorrow.
+ */
+const spanRow = (await q(
+  `SELECT date_diff('day', min(captured_at), max(captured_at)) AS span,
+          count(DISTINCT captured_at) AS captured,
+          min(captured_at) AS "first"
+     FROM adp_snapshots`,
+)) as { span: string | number | null; captured: string | number; first: string }[];
+const spanDays = Number(spanRow[0]?.span ?? 0);
+if (days > spanDays) {
+  // Span and captured-day count are reported separately on purpose: they
+  // differ whenever a day was missed (2026-08-14 was), and conflating them
+  // would overstate how much data is actually behind the window.
+  console.error(
+    `\nDAYS=${days} reaches back before the history starts — there is nothing to compare against.\n` +
+      `History starts ${spanRow[0]?.first} — a ${spanDays}-day span, ${spanRow[0]?.captured} of them captured.\n` +
+      `So the longest usable window is ${spanDays}: \`npm run rising ${posFilter ? posFilter + ' ' : ''}${spanDays}\`.\n` +
+      `That ceiling rises by one day on every ingest.\n`,
+  );
   process.exit(1);
 }
 

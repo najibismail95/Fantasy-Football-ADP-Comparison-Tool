@@ -3,7 +3,7 @@ import { detectCensoring } from '../lib/assert.js';
 import { heading, note, table, MARKDOWN } from '../lib/render.js';
 
 /** Sanity + first-look queries over the ingested data. `npm run report` */
-const conn = await openDb();
+const conn = await openDb('fantasy.duckdb', { readonly: true });
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
 
 await assertHydrated(conn, ['adp_snapshots', 'players']);

@@ -1,6 +1,6 @@
 import { test, describe, beforeEach, afterEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { parsePosition, parsePositiveNumber, POSITIONS } from './args.js';
+import { parsePosition, parsePositiveNumber, splitPositionAndDays, POSITIONS } from './args.js';
 
 const USAGE = 'usage: npm run thing [POS]';
 
@@ -110,5 +110,42 @@ describe('parsePositiveNumber', () => {
   test('uses the caller label so the message names the real argument', () => {
     rejects(() => parsePositiveNumber('nope', 7, 'DAYS', USAGE));
     assert.match(errors.join('\n'), /DAYS must be/);
+  });
+});
+
+describe('splitPositionAndDays', () => {
+  test('two arguments are always [POS, DAYS]', () => {
+    assert.deepEqual(splitPositionAndDays(['WR', '14']), ['WR', '14']);
+  });
+
+  test('a lone number is DAYS, not a position', () => {
+    // The gap this closes: `rising 14` used to filter to a position named
+    // "14" and print an empty board.
+    assert.deepEqual(splitPositionAndDays(['14']), [undefined, '14']);
+    assert.deepEqual(splitPositionAndDays(['7']), [undefined, '7']);
+  });
+
+  test('a lone decimal is DAYS too', () => {
+    assert.deepEqual(splitPositionAndDays(['1.5']), [undefined, '1.5']);
+  });
+
+  test('a lone non-number stays a position', () => {
+    assert.deepEqual(splitPositionAndDays(['WR']), ['WR', undefined]);
+  });
+
+  test('a lone typo stays a position so it still errors as one', () => {
+    // Must NOT be swallowed as days — the position validator has to see it.
+    assert.deepEqual(splitPositionAndDays(['ZZ']), ['ZZ', undefined]);
+    assert.deepEqual(splitPositionAndDays(['14x']), ['14x', undefined]);
+  });
+
+  test('no arguments means all positions and the default window', () => {
+    assert.deepEqual(splitPositionAndDays([]), [undefined, undefined]);
+  });
+
+  test('a numeric first of two is still treated as the position', () => {
+    // `rising 14 7` is nonsense; surfacing it as an unknown position is the
+    // honest outcome, not silently reinterpreting the pair.
+    assert.deepEqual(splitPositionAndDays(['14', '7']), ['14', '7']);
   });
 });

@@ -68,7 +68,7 @@ const ADP_WEIGHT = weightArg ? Number(weightArg.split('=')[1]) : 0;
  */
 const TARGET_PER_TIER = 3.5;
 
-const conn = await openDb();
+const conn = await openDb('fantasy.duckdb', { readonly: true });
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
 
 await assertHydrated(conn, ['adp_snapshots', 'projections', 'players']);

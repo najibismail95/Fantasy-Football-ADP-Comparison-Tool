@@ -68,3 +68,25 @@ export function parsePositiveNumber(
   }
   return n;
 }
+
+/**
+ * Split `[POS] [DAYS]` positionals when either may be omitted.
+ *
+ * The plain destructure left "every position over N days" unreachable: with
+ * the position omitted there is no way to address the days slot, so
+ * `rising 14` put "14" in the position slot and filtered to a position that
+ * does not exist — an empty board, no error.
+ *
+ * No position is numeric, so a single numeric argument is unambiguously the
+ * window. Two arguments always mean [POS, DAYS]; anything non-numeric alone
+ * is a position (and is validated as one, so a typo still errors).
+ */
+export function splitPositionAndDays(
+  positional: readonly string[],
+): [pos: string | undefined, days: string | undefined] {
+  const first = positional[0];
+  if (positional.length === 1 && first !== undefined && /^[0-9]+(\.[0-9]+)?$/.test(first)) {
+    return [undefined, first];
+  }
+  return [first, positional[1]];
+}
