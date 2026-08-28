@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG } from '../metrics/league-config.js';
 import { detectCensoring } from '../lib/assert.js';
 import { computeMomentum, selectMomentum, type SnapshotRow, type MomentumResult } from '../metrics/momentum.js';
 import { heading, note, table, MARKDOWN } from '../lib/render.js';
+import { parsePosition } from '../lib/args.js';
 
 /**
  * "Who's rising?" — ADP movement over the last N days, per source.
@@ -20,14 +21,15 @@ import { heading, note, table, MARKDOWN } from '../lib/render.js';
  */
 
 const [posArg, daysArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const posFilter = posArg?.toUpperCase();
+const usage = 'usage: npm run rising [POS] [DAYS]';
+const posFilter = parsePosition(posArg, usage);
 const days = daysArg ? Number(daysArg) : 7;
 // A bad value here isn't a graceful "no results" — it's a raw DuckDB
 // "Conversion Error" from an `INTERVAL 'NaN days'` expression deep in the
 // query, or (for 0/negative) a silently empty board with no hint the INPUT
 // was the problem rather than a quiet week. Catch it here instead.
 if (!Number.isFinite(days) || days <= 0) {
-  console.error(`\nDAYS must be a positive number, got "${daysArg}".\nusage: npm run rising [POS] [DAYS]\n`);
+  console.error(`\nDAYS must be a positive number, got "${daysArg}".\n${usage}\n`);
   process.exit(1);
 }
 

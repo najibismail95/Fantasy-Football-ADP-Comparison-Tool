@@ -3,6 +3,7 @@ import { DEFAULT_CONFIG } from '../metrics/league-config.js';
 import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { rankLabel } from '../metrics/sos.js';
 import { heading, note, table, MARKDOWN } from '../lib/render.js';
+import { parsePosition } from '../lib/args.js';
 
 /**
  * "Who has the easiest schedule, and does it hold up in the playoffs?"
@@ -16,7 +17,7 @@ import { heading, note, table, MARKDOWN } from '../lib/render.js';
  */
 
 const [posArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const posFilter = posArg?.toUpperCase();
+const posFilter = parsePosition(posArg, 'usage: npm run sos [POS]');
 
 const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();

@@ -6,6 +6,7 @@ import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
 import { roundOf } from '../metrics/rounds.js';
 import { heading, note, table, MARKDOWN } from '../lib/render.js';
+import { parsePosition, parsePositiveNumber } from '../lib/args.js';
 
 /**
  * "Find me a middle-round value" — for any position, any round range.
@@ -40,55 +41,16 @@ import { heading, note, table, MARKDOWN } from '../lib/render.js';
 // position slot and silently filters for a position named "--MARKDOWN" —
 // producing an empty board rather than an error. Same pattern as tiers.ts.
 const [posArg, minArg, maxArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const posFilter = posArg?.toUpperCase();
-const roundMin = minArg ? Number(minArg) : 4;
-const roundMax = maxArg ? Number(maxArg) : 10;
-
-/**
- * Validate the positionals rather than letting them fall through to a filter.
- *
- * Every bad input here used to produce a *plausible* board instead of an
- * error, which is the failure mode this command can least afford — the whole
- * output is a claim about which players are underpriced.
- *
- *  - a typo'd position ("values RBB") matched nothing and printed an empty
- *    board, directly beneath the standing note that an empty board "means
- *    there's no real value in that range, not a bug". It says that because
- *    that is normally true; here it actively misdirects.
- *  - non-numeric rounds ("values RB foo bar") were worse than empty. Number()
- *    gives NaN, every `round >= NaN` comparison is false, so the range filter
- *    silently dropped out and the command printed the FULL board — rounds 2.6
- *    through 7.7 — as though it were the requested range.
- *  - an inverted range ("values RB 10 4") can never match and is always a
- *    typo for the other order.
- *
- * rising.ts already guards its DAYS argument for the same reason.
- */
-const POSITIONS = ['QB', 'RB', 'WR', 'TE', 'K', 'DEF'] as const;
 const usage = 'usage: npm run values [POS] [ROUND_MIN] [ROUND_MAX]';
-
-if (posFilter && !(POSITIONS as readonly string[]).includes(posFilter)) {
-  console.error(
-    `\nunknown position "${posArg}" — expected one of ${POSITIONS.join(', ')}.\n${usage}\n`,
-  );
-  process.exit(1);
-}
-for (const [label, raw, value] of [
-  ['ROUND_MIN', minArg, roundMin],
-  ['ROUND_MAX', maxArg, roundMax],
-] as const) {
-  if (!Number.isFinite(value) || value <= 0) {
-    console.error(`\n${label} must be a positive number, got "${raw}".\n${usage}\n`);
-    process.exit(1);
-  }
-}
+const posFilter = parsePosition(posArg, usage);
+const roundMin = parsePositiveNumber(minArg, 4, 'ROUND_MIN', usage);
+const roundMax = parsePositiveNumber(maxArg, 10, 'ROUND_MAX', usage);
 if (roundMin > roundMax) {
   console.error(
     `\nROUND_MIN (${roundMin}) is after ROUND_MAX (${roundMax}) — no round can match.\n${usage}\n`,
   );
   process.exit(1);
 }
-
 
 const conn = await openDb();
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();

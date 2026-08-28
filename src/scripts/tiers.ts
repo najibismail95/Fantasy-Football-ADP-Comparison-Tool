@@ -4,6 +4,7 @@ import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.
 import { computeTiers, compositeScore } from '../metrics/tiers.js';
 import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
+import { parsePosition } from '../lib/args.js';
 
 /**
  * "Take the last guy in a tier before the cliff" (PLAN.md §2) — for any
@@ -34,7 +35,7 @@ const weightArg =
   args.find((a) => a.startsWith('--weight=')) ??
   (process.env.npm_config_weight ? `--weight=${process.env.npm_config_weight}` : undefined);
 const positional = args.filter((a) => !a.startsWith('--'));
-const pos = (positional[0] ?? 'QB').toUpperCase();
+const pos = parsePosition(positional[0], 'usage: npm run tiers [POS] [--all] [--weight=0..1]') ?? 'QB';
 
 // Catch the old `npm run tiers RB 8` form rather than silently ignoring it.
 if (positional[1] !== undefined) {
