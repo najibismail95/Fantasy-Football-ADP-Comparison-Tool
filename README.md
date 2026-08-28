@@ -17,7 +17,7 @@ npm install
 npm run ingest      # REQUIRED FIRST — see below
 ```
 
-**`npm run ingest` is not optional on a fresh clone.** The DuckDB file lives in `data/gold/` and is gitignored, so it doesn't come with the repo. `ingest` rebuilds it from the committed Parquet history in `data/silver/` and then fetches today's numbers. The report commands read that database directly and *do not* hydrate it themselves — run them first and you'll get empty tables with no error.
+**`npm run ingest` is not optional on a fresh clone.** The DuckDB file lives in `data/gold/` and is gitignored, so it doesn't come with the repo. `ingest` rebuilds it from the committed Parquet history in `data/silver/` and then fetches today's numbers. The report commands read that database directly and *do not* hydrate it themselves — run them first and they'll stop and tell you to ingest.
 
 Takes ~5-10s. After that, everything below works offline against the local database.
 
@@ -169,4 +169,20 @@ Two known limitations:
 - **Fixed to 12-team PPR, 1QB.** The metrics layer is config-general — hand `replacement.ts` a superflex config and it returns correct baselines — but no command takes a flag to do so. Multi-format support was scoped and declined: [FORMATS.md §5](./FORMATS.md#5-decision-record--multi-format-support-declined).
 - **Computed metrics aren't persisted.** VORP and tiers are recomputed per run, so there's history of how *ADP* moved but not of how a value grade did. [FORMATS.md §4](./FORMATS.md).
 
-Personal research tool. The sources are undocumented or unofficial — fine for private use, but check licensing before redistributing anything.
+## Licence and use
+
+**Shared for evaluation only. All rights reserved.** No licence is granted to
+use, copy, modify or redistribute this code or the captured data. If you want
+to do something with it, ask.
+
+This is a personal research tool. Every source is an unauthenticated public
+endpoint, but ESPN's and Yahoo's fantasy APIs are undocumented and unofficial:
+fine for private use, a different conversation for anything redistributed or
+commercialised. The Parquet history in `data/silver/` is committed so the tool
+is reproducible, not as a dataset to republish — it remains subject to each
+provider's own terms.
+
+If you're testing this, please run `npm run ingest` **once** rather than in a
+loop. The user-agent identifies the tool and claims one request per source per
+day, which is true of the daily CI job and stops being true if a dozen people
+poll it by hand.
