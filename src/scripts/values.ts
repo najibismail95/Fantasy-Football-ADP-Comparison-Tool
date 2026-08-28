@@ -1,4 +1,4 @@
-import { openDb } from '../db/client.js';
+import { openDb, assertHydrated } from '../db/client.js';
 import { DEFAULT_CONFIG, type LeagueConfig } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
 import { computeVorp, computeValueScore, gradeValueScores, qualifiesForValueBoard } from '../metrics/vorp.js';
@@ -6,6 +6,7 @@ import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
 import { roundOf } from '../metrics/rounds.js';
 import { heading, note, table, MARKDOWN } from '../lib/render.js';
+import { parsePosition, parsePositiveNumber } from '../lib/args.js';
 
 /**
  * "Find me a middle-round value" — for any position, any round range.
@@ -40,13 +41,21 @@ import { heading, note, table, MARKDOWN } from '../lib/render.js';
 // position slot and silently filters for a position named "--MARKDOWN" —
 // producing an empty board rather than an error. Same pattern as tiers.ts.
 const [posArg, minArg, maxArg] = process.argv.slice(2).filter((a) => !a.startsWith('--'));
-const posFilter = posArg?.toUpperCase();
-const roundMin = minArg ? Number(minArg) : 4;
-const roundMax = maxArg ? Number(maxArg) : 10;
+const usage = 'usage: npm run values [POS] [ROUND_MIN] [ROUND_MAX]';
+const posFilter = parsePosition(posArg, usage);
+const roundMin = parsePositiveNumber(minArg, 4, 'ROUND_MIN', usage);
+const roundMax = parsePositiveNumber(maxArg, 10, 'ROUND_MAX', usage);
+if (roundMin > roundMax) {
+  console.error(
+    `\nROUND_MIN (${roundMin}) is after ROUND_MAX (${roundMax}) — no round can match.\n${usage}\n`,
+  );
+  process.exit(1);
+}
 
-
-const conn = await openDb();
+const conn = await openDb('fantasy.duckdb', { readonly: true });
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
+
+await assertHydrated(conn, ['adp_snapshots', 'projections', 'players']);
 
 // Blended across ESPN + Sleeper ONLY. Yahoo has no third projection to add
 // here — checked directly: its public pub-api-ro endpoint carries no points

@@ -3,10 +3,69 @@ import path from 'node:path';
 import { DuckDBInstance, type DuckDBConnection } from '@duckdb/node-api';
 import { GOLD } from '../config.js';
 
-export async function openDb(file = 'fantasy.duckdb'): Promise<DuckDBConnection> {
-  await fs.mkdir(GOLD, { recursive: true });
-  const instance = await DuckDBInstance.create(path.join(GOLD, file));
+/**
+ * `readonly` is what lets two commands run at once.
+ *
+ * DuckDB takes an exclusive lock on the database file for a read-write
+ * connection, so opening the same file twice fails — and every command opened
+ * read-write, including the five that only ever SELECT. Two terminals (or one
+ * command left running) produced a raw driver error naming a PID and a lock
+ * file path, with nothing to say what to do about it. Verified: three
+ * concurrent READ_ONLY opens coexist happily, so the read commands simply
+ * stop taking a write lock they never needed.
+ *
+ * A read-only connection also cannot create the schema, which is correct
+ * rather than a limitation: there is nothing to create on a database the
+ * ingest has already built, and on one it hasn't, silently creating an empty
+ * database is exactly the behaviour that used to produce an empty report
+ * instead of "run the ingest".
+ */
+export async function openDb(
+  file = 'fantasy.duckdb',
+  { readonly = false } = {},
+): Promise<DuckDBConnection> {
+  const dbPath = path.join(GOLD, file);
+
+  if (readonly) {
+    try {
+      await fs.access(dbPath);
+    } catch {
+      console.error(
+        `\nno database at ${path.relative(process.cwd(), dbPath)}.\n\n` +
+          `Run \`npm run ingest\` first — it builds the database from the committed\n` +
+          `history in data/silver/ and fetches today's numbers.\n`,
+      );
+      process.exit(1);
+    }
+  } else {
+    await fs.mkdir(GOLD, { recursive: true });
+  }
+
+  let instance;
+  try {
+    instance = await DuckDBInstance.create(
+      dbPath,
+      readonly ? { access_mode: 'READ_ONLY' } : undefined,
+    );
+  } catch (err) {
+    // An active writer still blocks a reader — that part is inherent to
+    // DuckDB and cannot be opened away. What it must not do is surface as a
+    // driver stack trace about lock files and PIDs.
+    if (/Could not set lock|Conflicting lock/i.test(String(err))) {
+      console.error(
+        `\nthe database is in use by another process.\n\n` +
+          `\`npm run ingest\` holds a write lock while it runs (a few seconds) and\n` +
+          `blocks everything else. Wait for it to finish and try again.\n` +
+          `Read-only commands can run alongside each other; only the ingest locks.\n`,
+      );
+      process.exit(1);
+    }
+    throw err;
+  }
+
   const conn = await instance.connect();
+  if (readonly) return conn;
+
   const schema = await fs.readFile(
     path.join(path.dirname(new URL(import.meta.url).pathname), 'schema.sql'),
     'utf8',
@@ -281,4 +340,50 @@ export async function hydrateFromParquet(
     if (added > 0) loaded[table] = added;
   }
   return loaded;
+}
+
+/**
+ * Stop a read command that has nothing to read.
+ *
+ * openDb() CREATES the database if it isn't there, so a fresh clone that skips
+ * `npm run ingest` doesn't get an error — it gets an empty one, and every
+ * query below returns zero rows. The commands then render that as a perfectly
+ * well-formed empty board sitting under "an empty section means there's no
+ * real value in that range, not a bug", and replacement levels of "0 pts".
+ * Both statements are false here, and they point a new user at the data
+ * instead of at the missing setup step.
+ *
+ * sos.ts and rising.ts already refused this way; values/tiers/report did not.
+ * This is that same guard, shared, so the answer doesn't depend on which
+ * command you happened to type first.
+ *
+ * Checks emptiness rather than file existence on purpose: a half-finished
+ * ingest, or one whose sources all failed, leaves the file on disk and is the
+ * same dead end for the reader.
+ */
+export async function assertHydrated(
+  conn: DuckDBConnection,
+  tables: readonly string[],
+): Promise<void> {
+  const empty: string[] = [];
+  for (const t of tables) {
+    try {
+      const rows = await conn.runAndReadAll(`SELECT count(*) AS n FROM ${t}`);
+      const n = Number((rows.getRowObjectsJson() as { n: string | number }[])[0]?.n ?? 0);
+      if (n === 0) empty.push(t);
+    } catch {
+      // Table absent entirely — a half-built database, which is the same dead
+      // end for the reader as an empty one and gets the same answer.
+      empty.push(t);
+    }
+  }
+  if (empty.length === 0) return;
+
+  console.error(
+    `\nno data in the local database (${empty.join(', ')} ${empty.length === 1 ? 'is' : 'are'} empty).\n\n` +
+      `Run \`npm run ingest\` first — it rebuilds the database from the committed\n` +
+      `history in data/silver/ and fetches today's numbers. The report commands\n` +
+      `read the database, they don't populate it.\n`,
+  );
+  process.exit(1);
 }

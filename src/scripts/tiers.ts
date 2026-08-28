@@ -1,9 +1,10 @@
-import { openDb } from '../db/client.js';
+import { openDb, assertHydrated } from '../db/client.js';
 import { DEFAULT_CONFIG } from '../metrics/league-config.js';
 import { replacementLevels, type ProjectedPlayer } from '../metrics/replacement.js';
 import { computeTiers, compositeScore } from '../metrics/tiers.js';
 import { buildConsensusAdp, type RawAdpRow } from '../metrics/confidence.js';
 import { blendProjections, type SourceProjection } from '../metrics/projections.js';
+import { parsePosition, parseFraction } from '../lib/args.js';
 
 /**
  * "Take the last guy in a tier before the cliff" (PLAN.md §2) — for any
@@ -34,7 +35,7 @@ const weightArg =
   args.find((a) => a.startsWith('--weight=')) ??
   (process.env.npm_config_weight ? `--weight=${process.env.npm_config_weight}` : undefined);
 const positional = args.filter((a) => !a.startsWith('--'));
-const pos = (positional[0] ?? 'QB').toUpperCase();
+const pos = parsePosition(positional[0], 'usage: npm run tiers [POS] [--all] [--weight=0..1]') ?? 'QB';
 
 // Catch the old `npm run tiers RB 8` form rather than silently ignoring it.
 if (positional[1] !== undefined) {
@@ -58,7 +59,12 @@ if (positional[1] !== undefined) {
  * Projections still drive VORP, value scores and replacement level. This
  * weight only affects how the tier BOUNDARIES are drawn for display.
  */
-const ADP_WEIGHT = weightArg ? Number(weightArg.split('=')[1]) : 0;
+const ADP_WEIGHT = parseFraction(
+  weightArg?.split('=')[1],
+  0,
+  '--weight',
+  `usage: npm run tiers ${pos} [--all] [--weight=0..1]`,
+);
 
 /**
  * Target players per tier. Tiers exist to answer "take this guy now or wait
@@ -67,8 +73,10 @@ const ADP_WEIGHT = weightArg ? Number(weightArg.split('=')[1]) : 0;
  */
 const TARGET_PER_TIER = 3.5;
 
-const conn = await openDb();
+const conn = await openDb('fantasy.duckdb', { readonly: true });
 const q = async (sql: string) => (await conn.runAndReadAll(sql)).getRowObjectsJson();
+
+await assertHydrated(conn, ['adp_snapshots', 'projections', 'players']);
 
 const cfg = DEFAULT_CONFIG;
 
