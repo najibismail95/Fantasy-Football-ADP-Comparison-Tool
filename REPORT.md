@@ -1,6 +1,6 @@
-# Fantasy ADP report — 2026-09-18
+# Fantasy ADP report — 2026-09-19
 
-_Snapshot 2026-09-18 · 53 days of history collected. Generated automatically by the daily ingest workflow._
+_Snapshot 2026-09-19 · 54 days of history collected. Generated automatically by the daily ingest workflow._
 
 _ESPN ADP is censored above pick 166 — those values mean "very late", not a real average, so they are excluded from arbitrage._
 
@@ -12,9 +12,9 @@ _SLEEPER ADP is censored above pick 691 — those values mean "very late", not a
 
 | source | players | earliest_pick | deepest_pick | pct_decimal_top300 |
 | --- | --- | --- | --- | --- |
-| ESPN | 348 | 1.72 | 170.8 | 99 |
-| SLEEPER | 2474 | 1.5 | 700.9 | 84.7 |
-| YAHOO | 221 | 1.2 | 143.9 | 89.6 |
+| ESPN | 348 | 1.73 | 170.8 | 99 |
+| SLEEPER | 2475 | 1.5 | 700.9 | 84 |
+| YAHOO | 222 | 1.2 | 143.9 | 90.1 |
 
 
 ## Resolution tier distribution (fuzzy should stay ~0)
@@ -24,8 +24,8 @@ _SLEEPER ADP is censored above pick 691 — those values mean "very late", not a
 | ESPN | exact | 1170 |
 | ESPN | id | 460 |
 | ESPN | team | 110 |
-| SLEEPER | id | 2474 |
-| YAHOO | exact | 203 |
+| SLEEPER | id | 2475 |
+| YAHOO | exact | 204 |
 | YAHOO | team | 18 |
 
 
@@ -33,65 +33,70 @@ _SLEEPER ADP is censored above pick 691 — those values mean "very late", not a
 
 | player | pos | espn_adp | sleeper_adp | yahoo_adp | outlier_source | rounds | verdict | proj_pts |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Blake Corum | RB | 143.8 | 100.7 | 100 | ESPN | 3.6 | CHEAPER on ESPN | 147 |
-| Brian Thomas | WR | 133.9 | 74.5 | 83.9 | ESPN | 4.6 | CHEAPER on ESPN | 186 |
-| Chris Godwin | WR | 139.4 | 93.5 | 93.5 | ESPN | 3.8 | CHEAPER on ESPN | 170 |
-| Christian Watson | WR | 103.5 | 66.1 | 67.5 | ESPN | 3.1 | CHEAPER on ESPN | 198 |
-| Dalton Kincaid | TE | 132 | 87.2 | 95.2 | ESPN | 3.4 | CHEAPER on ESPN | 159 |
-| De'Zhaun Stribling | WR | 154.7 | 138.6 | 108.3 | YAHOO | 3.2 | pricier on YAHOO | 128 |
-| J.K. Dobbins | RB | 133.2 | 91.2 | 94.1 | ESPN | 3.4 | CHEAPER on ESPN | 168 |
-| Jayden Reed | WR | 149.5 | 108.5 | 113 | ESPN | 3.2 | CHEAPER on ESPN | 186 |
-| Jaylen Warren | RB | 110.6 | 70.9 | 75.3 | ESPN | 3.1 | CHEAPER on ESPN | 182 |
-| Jordan Love | QB | 156.2 | 159.1 | 121 | YAHOO | 3.1 | pricier on YAHOO | 275 |
-| Jordan Mason | RB | 157 | 109.3 | 110.5 | ESPN | 3.9 | CHEAPER on ESPN | 160 |
-| Josh Jacobs | RB | 119.2 | 50.1 | 69.9 | ESPN | 4.9 | CHEAPER on ESPN | 152 |
-| KC Concepcion | WR | 159.6 | 119.4 | 121.9 | ESPN | 3.2 | CHEAPER on ESPN | 156 |
-| Luther Burden | WR | 96 | 55.1 | 56.6 | ESPN | 3.3 | CHEAPER on ESPN | 208 |
-| MarShawn Lloyd | RB | 129.5 | 137.7 | 84 | YAHOO | 4.1 | pricier on YAHOO | 142 |
-| Quentin Johnston | WR | 149.1 | 111.9 | 105.3 | ESPN | 3.4 | CHEAPER on ESPN | 165 |
-| Rico Dowdle | RB | 124.7 | 86.1 | 87.7 | ESPN | 3.1 | CHEAPER on ESPN | 175 |
-| TreVeyon Henderson | RB | 104.9 | 60.8 | 70.5 | ESPN | 3.3 | CHEAPER on ESPN | 162 |
-| Tucker Kraft | TE | 103 | 63.2 | 59.2 | ESPN | 3.5 | CHEAPER on ESPN | 173 |
-| Tyler Shough | QB | 151.3 | 181.4 | 129.4 | SLEEPER | 3.4 | CHEAPER on SLEEPER | 272 |
+| Blake Corum | RB | 144.1 | 100.7 | 100 | ESPN | 3.6 | CHEAPER on ESPN | 147 |
+| Brian Thomas | WR | 134.5 | 74.5 | 84 | ESPN | 4.6 | CHEAPER on ESPN | 186 |
+| Chris Godwin | WR | 139.8 | 93.4 | 93.5 | ESPN | 3.9 | CHEAPER on ESPN | 170 |
+| Dalton Kincaid | TE | 128.7 | 88.7 | 95.1 | ESPN | 3.1 | CHEAPER on ESPN | 159 |
+| De'Zhaun Stribling | WR | 154.9 | 138.6 | 108.3 | YAHOO | 3.2 | pricier on YAHOO | 128 |
+| J.K. Dobbins | RB | 133.7 | 91.1 | 94.1 | ESPN | 3.4 | CHEAPER on ESPN | 168 |
+| Jacory Croskey-Merritt | RB | 146 | 115 | 104.6 | ESPN | 3 | CHEAPER on ESPN | 143 |
+| Jayden Reed | WR | 149.8 | 107.6 | 113 | ESPN | 3.3 | CHEAPER on ESPN | 186 |
+| Jaylen Warren | RB | 111.4 | 70.9 | 75.3 | ESPN | 3.2 | CHEAPER on ESPN | 182 |
+| Jordan Love | QB | 156 | 159.8 | 120.9 | YAHOO | 3.1 | pricier on YAHOO | 275 |
+| Jordan Mason | RB | 157.5 | 109.2 | 110.5 | ESPN | 4 | CHEAPER on ESPN | 160 |
+| Josh Jacobs | RB | 119.8 | 50.1 | 70 | ESPN | 5 | CHEAPER on ESPN | 152 |
+| KC Concepcion | WR | 160 | 120.6 | 121.9 | ESPN | 3.2 | CHEAPER on ESPN | 156 |
+| Luther Burden | WR | 96.6 | 56.9 | 56.7 | ESPN | 3.3 | CHEAPER on ESPN | 208 |
+| MarShawn Lloyd | RB | 130.2 | 137.6 | 84.1 | YAHOO | 4.1 | pricier on YAHOO | 142 |
+| Quentin Johnston | WR | 149.6 | 112.1 | 105.2 | ESPN | 3.4 | CHEAPER on ESPN | 165 |
+| Rico Dowdle | RB | 125.6 | 86 | 87.7 | ESPN | 3.2 | CHEAPER on ESPN | 175 |
+| TreVeyon Henderson | RB | 105.2 | 60.8 | 70.5 | ESPN | 3.3 | CHEAPER on ESPN | 162 |
+| Tucker Kraft | TE | 103.5 | 64.7 | 59.2 | ESPN | 3.5 | CHEAPER on ESPN | 173 |
+| Tyler Shough | QB | 150.7 | 181.3 | 129.3 | SLEEPER | 3.4 | CHEAPER on SLEEPER | 272 |
 
 
 ## Who’s rising
 
 
-_Last 7 days, as of 2026-09-18. `*_then`/`*_now` are that source's OWN ADP 7 days ago and today — a lower number now than then means rising, higher means falling. '—' means that source has no data for him this window (often Yahoo, whose history is still short — shorter windows fill it in). A player needs ESPN plus at least one other source to appear at all — one source moving alone, with nobody else to check it against, isn't shown no matter how big that move looks, and ESPN specifically has to be one of the sources backing it (see the code comment for why). Rows are sorted so players whose sources actually agree on direction surface above ones where only a single source backs the move — a real disagreement between tracked sources is still shown, not hidden, just ranked lower._
+_Last 7 days, as of 2026-09-19. `*_then`/`*_now` are that source's OWN ADP 7 days ago and today — a lower number now than then means rising, higher means falling. '—' means that source has no data for him this window (often Yahoo, whose history is still short — shorter windows fill it in). A player needs ESPN plus at least one other source to appear at all — one source moving alone, with nobody else to check it against, isn't shown no matter how big that move looks, and ESPN specifically has to be one of the sources backing it (see the code comment for why). Rows are sorted so players whose sources actually agree on direction surface above ones where only a single source backs the move — a real disagreement between tracked sources is still shown, not hidden, just ranked lower._
 
 
 ### Rising
 
 | player | pos | espn_then | espn_now | sleeper_then | sleeper_now | yahoo_then | yahoo_now |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Jalen Coker | WR | 154.8 | 147.6 | 149.2 | 147.2 | 133.4 | 131.8 |
+| Jalen Coker | WR | 154.9 | 144.1 | 149.4 | 147.2 | 133.4 | 131.4 |
+| Caleb Williams | QB | 86.2 | 76.1 | 70.5 | 71.1 | 65.3 | 64.8 |
+| Patrick Mahomes | QB | 109.9 | 101.8 | 110.4 | 110.3 | 106.2 | 105.8 |
+| Deebo Samuel | WR | 146 | 138.3 | 129.4 | 130.7 | 126.9 | 125.5 |
+| Isaiah Likely | TE | 123.9 | 116.2 | 107.6 | 106.6 | 109.1 | 108.5 |
+| Lamar Jackson | QB | 32.5 | 26.1 | 31.7 | 31.4 | 39.1 | 38.8 |
 
 
 ### Falling
 
 | player | pos | espn_then | espn_now | sleeper_then | sleeper_now | yahoo_then | yahoo_now |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| Rico Dowdle | RB | 98.8 | 121.4 | 86.6 | 86.3 | 87.3 | 87.7 |
-| TreVeyon Henderson | RB | 80.4 | 102.3 | 60.7 | 60.5 | 70 | 70.4 |
-| Jadarian Price | RB | 67.3 | 89.2 | 62.7 | 61.3 | 62.5 | 62.6 |
-| Courtland Sutton | WR | 83.4 | 104.9 | 79.5 | 79.3 | 108.9 | 109.3 |
-| Marvin Harrison | WR | 80.7 | 101.9 | 76.7 | 76.4 | 78.1 | 78.2 |
-| Jaylen Warren | RB | 86.6 | 107.8 | 71.4 | 70.4 | 75.2 | 75.3 |
-| Alec Pierce | WR | 105.6 | 126.7 | 96.1 | 95.9 | 97.6 | 98.2 |
-| Tony Pollard | RB | 87.3 | 108.1 | 84.1 | 83.7 | 86.2 | 86.5 |
-| MarShawn Lloyd | RB | 106.2 | 126.7 | 137.4 | 137.6 | 83.9 | 83.9 |
-| J.K. Dobbins | RB | 112.7 | 131 | 91.2 | 91.2 | 93.9 | 94.1 |
-| Matthew Stafford | QB | 93.9 | 112.2 | 94.4 | 94.4 | 99 | 99 |
-| Kenny Gainwell | RB | 101.3 | 118.9 | 111.5 | 111.5 | 121.2 | 121.4 |
-| Luther Burden | WR | 75.8 | 93.2 | 56 | 55.8 | 56.5 | 56.6 |
-| Carnell Tate | WR | 82.3 | 99.4 | 69.2 | 69.2 | 82.9 | 83.3 |
-| Brian Thomas | WR | 114.2 | 131.2 | 74.3 | 74.7 | 83.7 | 83.9 |
-| Justin Herbert | QB | 86.3 | 103.2 | 83 | 83.6 | 69.8 | 69.9 |
-| Jonathon Brooks | RB | 106.5 | 123.2 | 98.1 | 97.9 | 89.5 | 89.6 |
-| Michael Wilson | WR | 106.5 | 123.2 | 87.1 | 87.7 | 100.7 | 101 |
-| Terry McLaurin | WR | 61.7 | 78.2 | 55.2 | 55.6 | 55.4 | 55.7 |
-| Rome Odunze | WR | 69.4 | 85.7 | 65.6 | 65.6 | 67.4 | 67.6 |
+| Rico Dowdle | RB | 99.5 | 124.5 | 86.6 | 86.1 | 87.4 | 87.7 |
+| Jadarian Price | RB | 67.9 | 92.4 | 62.6 | 61.2 | 62.5 | 62.6 |
+| Courtland Sutton | WR | 84.1 | 108 | 79.5 | 79.1 | 109 | 109.3 |
+| Marvin Harrison | WR | 81.3 | 104.9 | 76.7 | 76.2 | 78.1 | 78.3 |
+| TreVeyon Henderson | RB | 81.2 | 104.8 | 60.3 | 60.8 | 70.2 | 70.5 |
+| Jaylen Warren | RB | 87.2 | 110.6 | 71.5 | 70.6 | 75.2 | 75.3 |
+| Tony Pollard | RB | 87.9 | 111.1 | 84.2 | 84.1 | 86.3 | 86.6 |
+| Alec Pierce | WR | 106.2 | 128.9 | 95.6 | 96.3 | 97.8 | 98.2 |
+| MarShawn Lloyd | RB | 107.1 | 129.4 | 137.6 | 137.7 | 83.8 | 84 |
+| Matthew Stafford | QB | 94.1 | 116.1 | 94.2 | 94.6 | 98.9 | 99 |
+| Justin Herbert | QB | 86.7 | 106.5 | 83.3 | 83.8 | 69.8 | 70 |
+| Carnell Tate | WR | 82.8 | 102.6 | 69.1 | 69.1 | 83 | 83.3 |
+| J.K. Dobbins | RB | 113.4 | 133.1 | 91.6 | 91 | 94 | 94.1 |
+| Kenny Gainwell | RB | 101.9 | 121.5 | 111.5 | 111.6 | 121.3 | 121.4 |
+| Luther Burden | WR | 76.3 | 95.9 | 56 | 56 | 56.5 | 56.6 |
+| Brian Thomas | WR | 114.8 | 133.7 | 74.3 | 74.5 | 83.7 | 83.9 |
+| Terry McLaurin | WR | 62.1 | 81.1 | 55.1 | 55.5 | 55.5 | 55.8 |
+| Michael Wilson | WR | 107.1 | 125.3 | 87.4 | 87.5 | 100.8 | 101 |
+| Jonathon Brooks | RB | 107.2 | 125.3 | 98.5 | 98.1 | 89.5 | 89.6 |
+| Jaylen Waddle | WR | 54.7 | 72.3 | 44.4 | 44 | 38.5 | 38.6 |
 
 
 ## Value board
@@ -103,7 +108,7 @@ _12-team PPR, 1QB/2RB/2WR/1TE/1FLEX. Replacement level: QB13 294pts, RB25 182pts
 _`espn_pts`/`sleeper_pts`: each source's own PPR projection, compare them yourself. `drafted_as`/`produces_like` are his rank by ADP vs. by production, per position — the gap between them is the story. `grade` curves the underlying point edge within his own position (A/B = top ~30%). A player must also project ABOVE replacement level to appear — outproducing the typical pick at your draft slot doesn't help if the whole neighborhood is worse than a waiver-wire add. Only A/B players make this board, listed alphabetically — an empty or short section means there's no real value in that range, not a bug._
 
 
-_2317 players excluded league-wide: fewer than 2 real ADP sources after removing values censored at a source's ceiling._
+_2318 players excluded league-wide: fewer than 2 real ADP sources after removing values censored at a source's ceiling._
 
 
 _6 more excluded league-wide: fewer than 2 projection sources, so "produces_like" would really just be one source's unchecked number — often because a player was dropped from one source's pool (e.g. a season-ending injury) while the other hasn't caught up yet._
@@ -116,9 +121,9 @@ _43 more excluded league-wide: ADP beyond 156 picks (12-team, 13 rounds) — mos
 
 | player | pos | adp | round | drafted_as | produces_like | grade | espn_pts | sleeper_pts |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Bo Nix | QB | 116.4 | 10.6 | QB15 | QB10 | B | 306 | 296 |
-| Brock Purdy | QB | 102.7 | 9.5 | QB13 | QB8 | B | 301 | 303 |
-| Jalen Hurts | QB | 57.9 | 5.7 | QB6 | QB4 | B | 329 | 311 |
+| Bo Nix | QB | 116.3 | 10.6 | QB15 | QB10 | B | 306 | 296 |
+| Brock Purdy | QB | 103.6 | 9.5 | QB13 | QB8 | B | 301 | 303 |
+| Jalen Hurts | QB | 58.1 | 5.8 | QB6 | QB4 | B | 329 | 311 |
 | Trevor Lawrence | QB | 102.1 | 9.4 | QB12 | QB9 | B | 299 | 303 |
 
 
@@ -127,21 +132,21 @@ _43 more excluded league-wide: ADP beyond 156 picks (12-team, 13 rounds) — mos
 | player | pos | adp | round | drafted_as | produces_like | grade | espn_pts | sleeper_pts |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | Quinshon Judkins | RB | 54.6 | 5.5 | RB22 | RB19 | B | 227 | 196 |
-| Rhamondre Stevenson | RB | 78 | 7.4 | RB28 | RB21 | A | 240 | 169 |
+| Rhamondre Stevenson | RB | 78.9 | 7.5 | RB28 | RB21 | A | 240 | 169 |
 
 
 ### WR
 
 | player | pos | adp | round | drafted_as | produces_like | grade | espn_pts | sleeper_pts |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| Courtland Sutton | WR | 108.1 | 9.9 | WR39 | WR33 | B | 205 | 174 |
+| Courtland Sutton | WR | 109.1 | 10 | WR39 | WR33 | B | 205 | 174 |
 | Emeka Egbuka | WR | 47 | 4.8 | WR21 | WR17 | B | 228 | 224 |
-| Garrett Wilson | WR | 45.2 | 4.7 | WR20 | WR13 | A | 252 | 225 |
+| Garrett Wilson | WR | 44.9 | 4.7 | WR19 | WR13 | B | 252 | 225 |
 | Jayden Reed | WR | 113 | 10.3 | WR43 | WR35 | B | 174 | 198 |
-| Michael Pittman | WR | 109 | 10 | WR40 | WR36 | B | 197 | 171 |
-| Mike Evans | WR | 70.9 | 6.8 | WR29 | WR26 | B | 192 | 222 |
-| Parker Washington | WR | 74.2 | 7.1 | WR30 | WR27 | B | 188 | 212 |
-| Rome Odunze | WR | 67.6 | 6.5 | WR28 | WR23 | B | 213 | 208 |
+| Michael Pittman | WR | 110 | 10.1 | WR40 | WR36 | B | 197 | 171 |
+| Mike Evans | WR | 70.8 | 6.8 | WR29 | WR26 | B | 192 | 222 |
+| Parker Washington | WR | 74.1 | 7.1 | WR30 | WR27 | B | 188 | 212 |
+| Rome Odunze | WR | 67.7 | 6.6 | WR28 | WR23 | B | 213 | 208 |
 
 
 ### TE
@@ -172,21 +177,21 @@ _Both are placings, not magnitudes: three playoff games swing much wider than fo
 | player | team | bye | adp | weeks 1-14 | weeks 15-17 | playoff shift |
 | --- | --- | --- | --- | --- | --- | --- |
 | Kyler Murray | MIN | 6 | 149.3 | C · 16th hardest | A · 1st easiest | much easier |
-| Matthew Stafford | LAR | 11 | 99 | D · 10th hardest | A · 2nd easiest | much easier |
+| Matthew Stafford | LAR | 11 | 99.1 | D · 10th hardest | A · 2nd easiest | much easier |
 | Trevor Lawrence | JAX | 7 | 102.1 | C · 11th easiest | A · 3rd easiest | much easier |
 | Jaxson Dart | NYG | 8 | 95.4 | B · 8th easiest | A · 4th easiest | much easier |
-| Tyler Shough | NO | 8 | 151.3 | C · 14th hardest | B · 7th easiest | much easier |
+| Tyler Shough | NO | 8 | 150.7 | C · 14th hardest | B · 7th easiest | much easier |
 
 
 #### Hardest
 
 | player | team | bye | adp | weeks 1-14 | weeks 15-17 | playoff shift |
 | --- | --- | --- | --- | --- | --- | --- |
-| Jalen Hurts | PHI | 10 | 57.9 | A · 1st easiest | D · 7th hardest | much harder |
-| Bo Nix | DEN | 10 | 116.4 | C · 12th hardest | D · 6th hardest | much harder |
-| Sam Darnold | SEA | 11 | 142.3 | B · 5th easiest | D · 5th hardest | much harder |
+| Jalen Hurts | PHI | 10 | 58.1 | A · 1st easiest | D · 7th hardest | much harder |
+| Bo Nix | DEN | 10 | 116.3 | C · 12th hardest | D · 6th hardest | much harder |
+| Sam Darnold | SEA | 11 | 141.6 | B · 5th easiest | D · 5th hardest | much harder |
 | Jayden Daniels | WAS | 7 | 57.6 | B · 6th easiest | F · 4th hardest | much harder |
-| Brock Purdy | SF | 8 | 102.7 | C · 13th easiest | F · 2nd hardest | much harder |
+| Brock Purdy | SF | 8 | 103.6 | C · 13th easiest | F · 2nd hardest | much harder |
 
 
 ### RB
@@ -199,8 +204,8 @@ _Both are placings, not magnitudes: three playoff games swing much wider than fo
 | Jeremiyah Love | ARI | 14 | 29.1 | F · 3rd hardest | A · 2nd easiest | much easier |
 | Jonathan Taylor | IND | 13 | 7 | C · 16th hardest | A · 3rd easiest | much easier |
 | Bhayshul Tuten | JAX | 7 | 62.1 | D · 9th hardest | A · 4th easiest | much easier |
-| Travis Etienne | NO | 8 | 42.3 | B · 8th easiest | B · 5th easiest | easier |
-| Derrick Henry | BAL | 13 | 16.4 | C · 15th easiest | B · 6th easiest | easier |
+| Travis Etienne | NO | 8 | 42.2 | B · 8th easiest | B · 5th easiest | easier |
+| Derrick Henry | BAL | 13 | 16.2 | C · 15th easiest | B · 6th easiest | easier |
 
 
 #### Hardest
@@ -233,10 +238,10 @@ _Both are placings, not magnitudes: three playoff games swing much wider than fo
 | player | team | bye | adp | weeks 1-14 | weeks 15-17 | playoff shift |
 | --- | --- | --- | --- | --- | --- | --- |
 | Tetairoa McMillan | CAR | 5 | 42 | C · 14th hardest | D · 7th hardest | harder |
-| Jaxon Smith-Njigba | SEA | 11 | 6.2 | B · 4th easiest | D · 5th hardest | much harder |
-| A.J. Brown | NE | 11 | 24.3 | C · 11th hardest | D · 4th hardest | harder |
+| Jaxon Smith-Njigba | SEA | 11 | 6.3 | B · 4th easiest | D · 5th hardest | much harder |
+| A.J. Brown | NE | 11 | 24.5 | C · 11th hardest | D · 4th hardest | harder |
 | DeVonta Smith | PHI | 10 | 33.9 | A · 1st easiest | D · 3rd hardest | much harder |
-| Garrett Wilson | NYJ | 13 | 45.2 | C · 16th hardest | F · 2nd hardest | much harder |
+| Garrett Wilson | NYJ | 13 | 44.9 | C · 16th hardest | F · 2nd hardest | much harder |
 
 
 ### TE
@@ -246,11 +251,11 @@ _Both are placings, not magnitudes: three playoff games swing much wider than fo
 
 | player | team | bye | adp | weeks 1-14 | weeks 15-17 | playoff shift |
 | --- | --- | --- | --- | --- | --- | --- |
-| Mark Andrews | BAL | 13 | 125.2 | C · 15th hardest | A · 2nd easiest | much easier |
-| Tyler Warren | IND | 13 | 47.6 | D · 8th hardest | A · 3rd easiest | much easier |
-| T.J. Hockenson | MIN | 6 | 157.6 | C · 14th hardest | B · 4th easiest | much easier |
+| Mark Andrews | BAL | 13 | 125.1 | C · 15th hardest | A · 2nd easiest | much easier |
+| Tyler Warren | IND | 13 | 48.4 | D · 8th hardest | A · 3rd easiest | much easier |
+| T.J. Hockenson | MIN | 6 | 157.4 | C · 14th hardest | B · 4th easiest | much easier |
 | Brock Bowers | LV | 13 | 23.1 | D · 9th hardest | B · 5th easiest | much easier |
-| Kyle Pitts | ATL | 11 | 71.8 | B · 9th easiest | B · 6th easiest | easier |
+| Kyle Pitts | ATL | 11 | 71.9 | B · 9th easiest | B · 6th easiest | easier |
 
 
 #### Hardest
@@ -258,7 +263,7 @@ _Both are placings, not magnitudes: three playoff games swing much wider than fo
 | player | team | bye | adp | weeks 1-14 | weeks 15-17 | playoff shift |
 | --- | --- | --- | --- | --- | --- | --- |
 | Dalton Schultz | HOU | 8 | 151.9 | B · 8th easiest | D · 7th hardest | much harder |
-| AJ Barner | SEA | 11 | 156.2 | C · 13th easiest | D · 6th hardest | much harder |
+| AJ Barner | SEA | 11 | 156.1 | C · 13th easiest | D · 6th hardest | much harder |
 | Sam LaPorta | DET | 6 | 62.8 | C · 15th easiest | D · 5th hardest | much harder |
 | Colston Loveland | CHI | 10 | 39.3 | C · 16th hardest | D · 4th hardest | much harder |
 | George Kittle | SF | 8 | 79.6 | C · 16th easiest | F · 1st hardest | much harder |
